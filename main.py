@@ -23,7 +23,7 @@ def create_output_dir(company_name: str) -> str:
 
 async def generate_report(
     company_name: str,
-    stock_code: str = None,
+    stock_code: str,
     output_dir: str = None,
     config_file: str = None
 ) -> Dict[str, Any]:
@@ -31,8 +31,8 @@ async def generate_report(
     生成公司研报
     
     Args:
-        company_name: 公司名称
-        stock_code: 股票代码 (可选)
+        company_name: 公司名称 (必需)
+        stock_code: 股票代码 (必需)
         output_dir: 输出目录 (可选)
         config_file: 配置文件路径 (可选)
     
@@ -45,12 +45,11 @@ async def generate_report(
             config = LLMConfig.from_file(config_file)
         else:
             config = LLMConfig()
-        
-        # 创建输出目录
+          # 创建输出目录
         if not output_dir:
             output_dir = create_output_dir(company_name)
         
-        print(f"开始生成 {company_name} 的研报...")
+        print(f"开始生成 {company_name} ({stock_code}) 的研报...")
         print(f"输出目录: {output_dir}")
         
         # 初始化研报生成器
@@ -96,11 +95,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例用法:
-  python main.py --company "平安银行"
   python main.py --company "平安银行" --stock-code "000001.SZ"
-  python main.py --company "平安银行" --output-dir "./my_reports"
-  python main.py --company "平安银行" --config "./my_config.yaml"
-        """
+  python main.py --company "贵州茅台" --stock-code "600519.SH"
+  python main.py -c "平安银行" -s "000001.SZ" --output-dir "./my_reports"
+  python main.py -c "平安银行" -s "000001.SZ" --config "./my_config.yaml"        """
     )
     
     parser.add_argument(
@@ -111,7 +109,8 @@ def main():
     
     parser.add_argument(
         "--stock-code", "-s",
-        help="股票代码 (可选，如: 000001.SZ)"
+        required=True,
+        help="股票代码 (必需，如: 000001.SZ, 600519.SH)"
     )
     
     parser.add_argument(
