@@ -1,37 +1,14 @@
-# 核心依赖
-openai>=1.0.0
-python-dotenv>=1.0.0
-pyyaml>=6.0
-aiofiles>=23.0.0
-
-# 数据处理
-pandas>=2.0.0
-numpy>=1.24.0
-akshare>=1.12.0
-
-# 图表和可视化
-matplotlib>=3.7.0
-seaborn>=0.12.0
-plotly>=5.15.0
-
-# 网络请求
-requests>=2.31.0
-aiohttp>=3.8.0
-httpx>=0.24.0
-
-# 数据库（如果需要）
-sqlite3
-
-# Jupyter支持
-ipython>=8.12.0
-jupyter>=1.0.0
-
-# 其他工具
-tqdm>=4.65.0
-colorama>=0.4.6
-
-# 开发和测试（可选）
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-black>=23.7.0
-flake8>=6.0.0
+# 异步研报生成器依赖包
+aiofiles>=23.1.0
+asyncio
+python-dotenv
+pandas
+numpy
+matplotlib>=3.5.0
+seaborn
+openai
+requests
+duckduckgo-search
+beautifulsoup4
+lxml
+pillow>=8.0.0

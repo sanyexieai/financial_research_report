@@ -128,14 +128,31 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# IDEs and editors
+# Project specific
+# Output files and generated reports
+outputs/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.xlsx
+*.csv
+!贵州茅台利润表.csv
+
+# 允许assets目录下的图片文件（项目资源）
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Operating System Files
+# OS specific files
 .DS_Store
 .DS_Store?
 ._*
@@ -144,62 +161,13 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-# Project specific files
-# Generated reports and outputs
-*.docx
-*.pdf
-*.html
-财务分析汇总报告_*.txt
-财务研报汇总_*.md
-深度财务研报分析_*.md
-
-# Compressed files
-*.zip
-*.7z
-*.rar
-*.tar.gz
-
-# Generated images (keep source images if needed)
-images/*.png
-images/*.jpg
-images/*.jpeg
-images/*.svg
-
-# Downloaded data files
-download_financial_statement_files/*.csv
-download_financial_statement_files/*.xlsx
-
-# Company info cache
-company_info/*.txt
-
-# Output directories
-outputs/
-old_data/
-
-# Temporary files
-temp/
-tmp/
-*.tmp
-
-# API keys and sensitive data
+# API keys and configuration
 config.ini
+.env
 secrets.json
 api_keys.txt
-.env.local
 
-# Log files
+# Temporary files
+*.tmp
+*.temp
 *.log
-logs/
-
-# Database files
-*.db
-*.sqlite
-
-# Cache files
-.cache/
-cache/
-
-# Model files (if any)
-*.pkl
-*.joblib
-*.model

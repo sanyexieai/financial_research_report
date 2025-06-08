@@ -115,11 +115,10 @@ from IPython.display import display
             elif isinstance(node, ast.ImportFrom):
                 if node.module not in self.ALLOWED_IMPORTS:
                     return False, f"不允许的导入: {node.module}"
-            
-            # 检查危险函数调用
+              # 检查危险函数调用
             elif isinstance(node, ast.Call):
                 if isinstance(node.func, ast.Name):
-                    if node.func.id in ['exec', 'eval', 'open', '__import__']:
+                    if node.func.id in ['exec', 'eval', '__import__']:
                         return False, f"不允许的函数调用: {node.func.id}"
         
         return True, ""

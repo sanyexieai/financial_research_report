@@ -11,13 +11,13 @@ import os
 import json
 import yaml
 from typing import Dict, Any, List, Optional
-from utils.create_session_dir import create_session_output_dir
-from utils.format_execution_result import format_execution_result
-from utils.extract_code import extract_code_from_response
-from utils.llm_helper import LLMHelper
-from utils.code_executor import CodeExecutor
-from config.llm_config import LLMConfig
-from company_research_report.analyzers.prompts import data_analysis_system_prompt, final_report_system_prompt
+from .utils.create_session_dir import create_session_output_dir
+from .utils.format_execution_result import format_execution_result
+from .utils.extract_code import extract_code_from_response
+from .utils.llm_helper import LLMHelper
+from .utils.code_executor import CodeExecutor
+from .config.llm_config import LLMConfig
+from .prompts import data_analysis_system_prompt, final_report_system_prompt,final_report_system_prompt_absolute
 
 
 class DataAnalysisAgent:
@@ -30,7 +30,10 @@ class DataAnalysisAgent:
     - 执行代码并收集结果
     - 基于执行结果继续生成后续分析代码
     """
-    def __init__(self, llm_config: LLMConfig = None, output_dir: str = "outputs", max_rounds: int = 20):
+    def __init__(self, llm_config: LLMConfig = None,
+                 output_dir: str = "outputs",
+                 max_rounds: int = 20,
+                 absolute_path: bool = False):
         """
         初始化智能体
         
@@ -49,6 +52,7 @@ class DataAnalysisAgent:
         self.current_round = 0
         self.session_output_dir = None
         self.executor = None
+        self.absolute_path = absolute_path
 
     def _process_response(self, response: str) -> Dict[str, Any]:
         """
@@ -110,49 +114,67 @@ class DataAnalysisAgent:
             print(f"   📝 描述: {description}")
             print(f"   🔍 分析: {analysis}")
             
-            # 验证文件是否存在
+            # 只保留真实存在的图片
             if file_path and os.path.exists(file_path):
                 print(f"   ✅ 文件存在: {file_path}")
+                collected_figures.append({
+                    'figure_number': figure_number,
+                    'filename': filename,
+                    'file_path': file_path,
+                    'description': description,
+                    'analysis': analysis
+                })
             elif file_path:
-                print(f"   ⚠️ 文件不存在: {file_path}")
+                print(f"   ⚠️ 文件不存在: {file_path}，已跳过该图片")
             else:
-                print(f"   ⚠️ 未提供文件路径")
-            
-            # 记录图片信息
-            collected_figures.append({
-                'figure_number': figure_number,
-                'filename': filename,
-                'file_path': file_path,
-                'description': description,
-                'analysis': analysis
-            })
+                print(f"   ⚠️ 未提供文件路径，已跳过该图片")
+        
         
         return {
             'action': 'collect_figures',
             'collected_figures': collected_figures,
-            'response': response,
+            'response': response,  # response 仍然原样保留，若需彻底净化可进一步处理
             'continue': True
         }
     def _handle_generate_code(self, response: str, yaml_data: Dict[str, Any]) -> Dict[str, Any]:
         """处理代码生成和执行动作"""
-        # 从YAML数据中获取代码（更准确）
         code = yaml_data.get('code', '')
-        
-        # 如果YAML中没有代码，尝试从响应中提取
         if not code:
             code = extract_code_from_response(response)
-        
         if code:
             print(f"🔧 执行代码:\n{code}")
             print("-" * 40)
-            
-            # 执行代码
             result = self.executor.execute_code(code)
-            
-            # 格式化执行结果
             feedback = format_execution_result(result)
             print(f"📋 执行反馈:\n{feedback}")
-            
+            # 检查代码执行结果中是否有图片生成但文件不存在的情况
+            # 假设图片保存路径会在 result['output'] 或 result['figures'] 里体现
+            # 如果检测到图片文件不存在，建议用户重新分析
+            missing_figures = []
+            output = result.get('output', '')
+            # 简单正则或字符串查找图片路径并判断是否存在
+            import re
+            img_paths = re.findall(r'(?:[\w./\\-]+\.(?:png|jpg|jpeg|svg))', str(output))
+            for img_path in img_paths:
+                if not os.path.isabs(img_path):
+                    abs_path = os.path.join(self.session_output_dir, img_path)
+                else:
+                    abs_path = img_path
+                if not os.path.exists(abs_path):
+                    missing_figures.append(img_path)
+            if missing_figures:
+                feedback += f"\n⚠️ 检测到以下图片未生成成功: {missing_figures}\n建议重新分析本轮或修正代码后再试。"
+                # 可以在这里返回一个特殊标志，供 analyze 主流程判断是否需要重启分析
+                return {
+                    'action': 'generate_code',
+                    'code': code,
+                    'result': result,
+                    'feedback': feedback,
+                    'response': response,
+                    'continue': False,  # 终止本轮分析
+                    'need_restart': True,
+                    'missing_figures': missing_figures
+                }
             return {
                 'action': 'generate_code',
                 'code': code,
@@ -162,7 +184,6 @@ class DataAnalysisAgent:
                 'continue': True
             }
         else:
-            # 如果没有代码，说明LLM响应格式有问题，需要重新生成
             print("⚠️ 未从响应中提取到可执行代码，要求LLM重新生成")
             return {
                 'action': 'invalid_response',
@@ -218,7 +239,8 @@ class DataAnalysisAgent:
             self.current_round += 1
             print(f"\n🔄 第 {self.current_round} 轮分析")
               # 调用LLM生成响应
-            try:                # 获取当前执行环境的变量信息
+            try:                
+                # 获取当前执行环境的变量信息
                 notebook_variables = self.executor.get_environment_info()
                 
                 # 格式化系统提示词，填入动态的notebook变量信息
@@ -265,17 +287,18 @@ class DataAnalysisAgent:
                 elif process_result['action'] == 'collect_figures':
                     # 记录图片收集结果
                     collected_figures = process_result.get('collected_figures', [])
+                    filtered_figures_to_collect = process_result.get('filtered_figures_to_collect', [])
                     feedback = f"已收集 {len(collected_figures)} 个图片及其分析"
                     self.conversation_history.append({
                         'role': 'user', 
                         'content': f"图片收集反馈:\n{feedback}\n请继续下一步分析。"
                     })
-                    
-                    # 记录到分析结果中
+                    # 只记录过滤后的图片记忆
                     self.analysis_results.append({
                         'round': self.current_round,
                         'action': 'collect_figures',
                         'collected_figures': collected_figures,
+                        'filtered_figures_to_collect': filtered_figures_to_collect,
                         'response': response
                     })
            
@@ -322,29 +345,47 @@ class DataAnalysisAgent:
         # 构建用于生成最终报告的提示词
         final_report_prompt = self._build_final_report_prompt(all_figures)
         
-        try:            # 调用LLM生成最终报告
-            response = self.llm.call(
-                prompt=final_report_prompt,
-                system_prompt="你将会接收到一个数据分析任务的最终报告请求，请根据提供的分析结果和图片信息生成完整的分析报告。",
-                max_tokens=16384  # 设置较大的token限制以容纳完整报告
-            )
+        # 调用LLM生成最终报告
+        response = self.llm.call(
+            prompt=final_report_prompt,
+            system_prompt="你将会接收到一个数据分析任务的最终报告请求，请根据提供的分析结果和图片信息生成完整的分析报告。",
+            max_tokens=16384  
+        )
+        
+        # 解析响应，提取最终报告
+        try:
+            yaml_data = self.llm.parse_yaml_response(response)
+            if yaml_data.get('action') == 'analysis_complete':
+                final_report_content = yaml_data.get('final_report', '报告生成失败')
+            else:
+                final_report_content = "LLM未返回analysis_complete动作，报告生成失败"
+        except:
+            # 如果解析失败，直接使用响应内容
+            final_report_content = response
+        
+        print("✅ 最终报告生成完成")
+        # 手动添加附件清单到报告末尾
+        if all_figures:
+            appendix_section = "\n\n## 附件清单\n\n"
+            appendix_section += "本报告包含以下图片附件：\n\n"
             
-            # 解析响应，提取最终报告
-            try:
-                yaml_data = self.llm.parse_yaml_response(response)
-                if yaml_data.get('action') == 'analysis_complete':
-                    final_report_content = yaml_data.get('final_report', '报告生成失败')
+            for i, figure in enumerate(all_figures, 1):
+                filename = figure.get('filename', '未知文件名')
+                description = figure.get('description', '无描述')
+                analysis = figure.get('analysis', '无分析')
+                file_path = figure.get('file_path', '')
+                
+                appendix_section += f"{i}. **{filename}**\n"
+                appendix_section += f"   - 描述：{description}\n"
+                appendix_section += f"   - 细节分析：{analysis}\n"
+                if self.absolute_path:
+                    appendix_section += f"   - 文件路径：{file_path}\n"
                 else:
-                    final_report_content = "LLM未返回analysis_complete动作，报告生成失败"
-            except:
-                # 如果解析失败，直接使用响应内容
-                final_report_content = response
+                    appendix_section += f"   - 文件路径：./{filename}\n"
+                appendix_section += "\n"
             
-            print("✅ 最终报告生成完成")
-            
-        except Exception as e:
-            print(f"❌ 生成最终报告时出错: {str(e)}")
-            final_report_content = f"报告生成失败: {str(e)}"
+            # 将附件清单添加到报告内容末尾
+            final_report_content += appendix_section
         
         # 保存最终报告到文件
         report_file_path = os.path.join(self.session_output_dir, "最终分析报告.md")
@@ -352,6 +393,8 @@ class DataAnalysisAgent:
             with open(report_file_path, 'w', encoding='utf-8') as f:
                 f.write(final_report_content)
             print(f"📄 最终报告已保存至: {report_file_path}")
+            if all_figures:
+                print(f"📎 已添加 {len(all_figures)} 个图片的附件清单")
         except Exception as e:
             print(f"❌ 保存报告文件失败: {str(e)}")
         
@@ -363,7 +406,8 @@ class DataAnalysisAgent:
             'collected_figures': all_figures,
             'conversation_history': self.conversation_history,
             'final_report': final_report_content,
-            'report_file_path': report_file_path        }
+            'report_file_path': report_file_path       
+            }
 
     def _build_final_report_prompt(self, all_figures: List[Dict[str, Any]]) -> str:
         """构建用于生成最终报告的提示词"""
@@ -377,7 +421,7 @@ class DataAnalysisAgent:
                 # 使用相对路径格式，适合在报告中引用
                 relative_path = f"./{filename}"
                 figures_summary += f"{i}. {filename}\n"
-                figures_summary += f"   相对路径: {relative_path}\n"
+                figures_summary += f"   路径: {relative_path}\n"
                 figures_summary += f"   描述: {figure.get('description', '无描述')}\n"
                 figures_summary += f"   分析: {figure.get('analysis', '无分析')}\n\n"
         else:
@@ -397,22 +441,13 @@ class DataAnalysisAgent:
 
         
         # 使用 prompts.py 中的统一提示词模板，并添加相对路径使用说明
-        prompt = final_report_system_prompt.format(
+        pre_prompt = final_report_system_prompt_absolute if self.absolute_path else final_report_system_prompt
+        prompt = pre_prompt.format(
             current_round=self.current_round,
             session_output_dir=self.session_output_dir,
             figures_summary=figures_summary,
             code_results_summary=code_results_summary
         )
-        
-        # 在提示词中明确要求使用相对路径
-        prompt += """
-
-📁 **图片路径使用说明**：
-报告和图片都在同一目录下，请在报告中使用相对路径引用图片：
-- 格式：![图片描述](./图片文件名.png)
-- 示例：![营业总收入趋势](./营业总收入趋势.png)
-- 这样可以确保报告在不同环境下都能正确显示图片
-"""
         
         return prompt
 
