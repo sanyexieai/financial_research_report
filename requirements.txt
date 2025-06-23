@@ -20,6 +20,7 @@ openai>=1.0.0
 # ========== 网络请求与数据采集 ==========
 requests>=2.25.0
 aiofiles>=23.1.0
+k-sogou-search
 
 # ========== 网页解析与搜索 ==========
 beautifulsoup4>=4.9.0

@@ -26,20 +26,26 @@ from utils.get_financial_statements import get_all_financial_statements, save_fi
 from utils.identify_competitors import identify_competitors_with_ai
 from utils.get_stock_intro import get_stock_intro, save_stock_intro_to_txt
 from duckduckgo_search import DDGS
+from utils.search_engine import SearchEngine
 
 class IntegratedResearchReportGenerator:
     """整合的研报生成器类"""
     
-    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK"):
+    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK", search_engine="ddg"):
         # 环境变量与全局配置
         load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.model = os.getenv("OPENAI_MODEL", "gpt-4")
-        
+        # 打印模型
+        print(f"🔧 使用的模型: {self.model}")
         self.target_company = target_company
         self.target_company_code = target_company_code
         self.target_company_market = target_company_market
+        
+        # 搜索引擎配置
+        self.search_engine = SearchEngine(search_engine)
+        print(f"🔍 搜索引擎已配置为: {search_engine.upper()}")
         
         # 目录配置
         self.data_dir = "./download_financial_statement_files"
@@ -171,27 +177,22 @@ class IntegratedResearchReportGenerator:
         # 5. 搜索行业信息
         print("\n🔍 搜索行业信息...")
         all_search_results = {}
-        
-        # 搜索目标公司行业信息
+          # 搜索目标公司行业信息
         target_search_keywords = f"{self.target_company} 行业地位 市场份额 竞争分析 业务模式"
-        target_results = DDGS().text(
-            keywords=target_search_keywords,
-            region="cn-zh",
-            max_results=10
-        )
+        print(f"  正在搜索: {target_search_keywords}")
+        # 进行目标公司搜索
+        target_results = self.search_engine.search(target_search_keywords, 10)
         all_search_results[self.target_company] = target_results
-        
+
         # 搜索竞争对手行业信息
         for company in listed_companies:
             company_name = company.get('name')
             search_keywords = f"{company_name} 行业地位 市场份额 业务模式 发展战略"
-            competitor_results = DDGS().text(
-                keywords=search_keywords,
-                region="cn-zh",
-                max_results=10
-            )
+            print(f"  正在搜索: {search_keywords}")
+            competitor_results = self.search_engine.search(search_keywords, 10)
             all_search_results[company_name] = competitor_results
-            time.sleep(15)
+            # 增加延迟避免请求过于频繁
+            time.sleep(self.search_engine.delay * 2)
         
         # 保存搜索结果
         search_results_file = os.path.join(self.industry_info_dir, "all_search_results.json")
@@ -725,11 +726,24 @@ class IntegratedResearchReportGenerator:
 
 def main():
     """主函数"""
+    import argparse
+    
+    # 添加命令行参数支持
+    parser = argparse.ArgumentParser(description='整合的金融研报生成器')
+    parser.add_argument('--search-engine', choices=['ddg', 'sogou'], default='sogou',
+                       help='搜索引擎选择: ddg (DuckDuckGo) 或 sogou (搜狗), 默认: ddg')
+    parser.add_argument('--company', default='商汤科技', help='目标公司名称')
+    parser.add_argument('--code', default='00020', help='股票代码')
+    parser.add_argument('--market', default='HK', help='市场代码')
+    
+    args = parser.parse_args()
+    
     # 创建生成器实例
     generator = IntegratedResearchReportGenerator(
-        target_company="商汤科技",
-        target_company_code="00020", 
-        target_company_market="HK"
+        target_company=args.company,
+        target_company_code=args.code, 
+        target_company_market=args.market,
+        search_engine=args.search_engine
     )
     
     # 运行完整流程
