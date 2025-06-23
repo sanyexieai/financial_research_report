@@ -75,7 +75,7 @@ financial_research_report/
 ├── 📄 核心生成器
 │   ├── research_report_generator.py          # 基础研报生成器
 │   ├── integrated_research_report_generator.py  # 整合式研报生成器
-│   └── in_depth_research_report_generator.py    # 深度研报生成器
+│   └── in_depth_research_report_generator.py    # 数据收集部分
 ├── 📄 工作流引擎
 │   ├── industry_workflow.py                 # 行业研究工作流
 │   └── macro_workflow.py                   # 宏观经济研究工作流
