@@ -6,7 +6,7 @@
 
 from search_engine import create_search_engine
 
-def search_company_industry_info(company_name: str, engine: str = "ddg", max_results: int = 10):
+def search_company_industry_info(company_name: str, engine: str = "sogou", max_results: int = 10):
     """
     搜索公司行业信息
     
