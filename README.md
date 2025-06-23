@@ -73,7 +73,7 @@ graph TB
 ```
 financial_research_report/
 ├── 📄 核心生成器
-│   ├── research_report_generator.py          # 基础研报生成器
+│   ├── research_report_generator.py          # 研报生成器
 │   ├── integrated_research_report_generator.py  # 整合式研报生成器
 │   └── in_depth_research_report_generator.py    # 数据收集部分
 ├── 📄 工作流引擎
