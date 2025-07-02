@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-简化的 Notebook 数据分析智能体
-仅包含用户和助手两个角2. 图片必须保存到指定的会话目录中，输出绝对路径，禁止使用plt.show()
-3. 表格输出控制：超过15行只显示前5行和后5行
-4. 强制使用SimHei字体：plt.rcParams['font.sans-serif'] = ['SimHei']
-5. 输出格式严格使用YAML共享上下文的单轮对话模式
-"""
 
 import os
 import json
@@ -46,7 +39,7 @@ class DataAnalysisAgent:
         self.llm = LLMHelper(self.config)
         self.base_output_dir = output_dir
         self.max_rounds = max_rounds
-          # 对话历史和上下文
+        # 对话历史和上下文
         self.conversation_history = []
         self.analysis_results = []
         self.current_round = 0
