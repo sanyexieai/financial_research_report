@@ -203,3 +203,6 @@ cache/
 *.pkl
 *.joblib
 *.model
+# 数据文件
+*.csv
+*.xlsx

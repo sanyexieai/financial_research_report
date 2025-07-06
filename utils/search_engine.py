@@ -6,7 +6,7 @@
 import time
 from typing import List, Dict, Any
 from duckduckgo_search import DDGS
-from googlenews_utils import GoogleNewsSearch
+from utils.googlenews_utils import GoogleNewsSearch
 from datetime import datetime
 
 # 尝试导入搜狗搜索，如果失败则只支持DDG
@@ -19,15 +19,22 @@ except ImportError:
 class SearchEngine:
     """搜索引擎封装类，支持多引擎合并去重"""
 
-    def __init__(self, engine: str = "ddg"):
+    def __init__(self, engine=None):
         """
         初始化搜索引擎
 
         Args:
-            engine: 搜索引擎类型，支持 "ddg" (DuckDuckGo)、"sogou" (搜狗)、"google" (Google News) 或它们的列表
+            engine: 搜索引擎类型，支持 "ddg" (DuckDuckGo)、"sogou" (搜狗)、"google" (Google News) 或它们的列表。若为空则默认全部。
         """
-        if isinstance(engine, str):
-            self.engines = [engine.lower()]
+        all_supported = ["ddg", "sogou", "google"]
+        # 处理 engine 参数为空的情况
+        if not engine or (isinstance(engine, (list, tuple)) and not engine):
+            self.engines = all_supported.copy()
+        elif isinstance(engine, str):
+            if engine.strip() == "":
+                self.engines = all_supported.copy()
+            else:
+                self.engines = [engine.lower()]
         else:
             self.engines = [e.lower() for e in engine]
         self.delay = 1.0  # 默认搜索延迟
@@ -35,7 +42,7 @@ class SearchEngine:
         # 检查支持性
         valid_engines = []
         for e in self.engines:
-            if e not in ["ddg", "sogou", "google"]:
+            if e not in all_supported:
                 print(f"警告: 不支持的搜索引擎: {e}. 跳过。")
                 continue
             if e == "sogou" and not SOGOU_AVAILABLE:
@@ -43,7 +50,7 @@ class SearchEngine:
                 continue
             valid_engines.append(e)
         if not valid_engines:
-            raise ValueError("没有可用的搜索引擎。支持: 'ddg', 'sogou', 'google'")
+            raise ValueError("未指定有效的搜索引擎。")
         self.engines = valid_engines
 
     def search(self, keywords: str, max_results: int = 10, start_date=None, end_date=None) -> List[Dict[str, Any]]:
@@ -90,6 +97,7 @@ class SearchEngine:
 
     def _search_ddg(self, keywords: str, max_results: int) -> List[Dict[str, Any]]:
         """DuckDuckGo 搜索"""
+        print(f"使用 DuckDuckGo 搜索: {keywords}")
         results = DDGS().text(
             keywords=keywords,
             region="cn-zh",
@@ -107,6 +115,7 @@ class SearchEngine:
 
     def _search_sogou(self, keywords: str, max_results: int) -> List[Dict[str, Any]]:
         """搜狗搜索"""
+        print(f"使用搜狗搜索: {keywords}")
         if not SOGOU_AVAILABLE:
             return []
         # 假设 sogou_search 返回的结果已包含 title, url, description 字段
@@ -114,25 +123,13 @@ class SearchEngine:
 
     def _search_google(self, keywords: str, max_results: int, start_date=None, end_date=None) -> List[Dict[str, Any]]:
         """Google News 搜索"""
-        # start_date, end_date 格式: yyyy-mm-dd
-        # getNewsData 返回: link, title, snippet, date, source
+        print(f"使用 Google News 搜索: {keywords}")
+        # 如果没有传 start_date/end_date，则不加时间限制
         if not start_date:
-            start_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = None
         if not end_date:
-            end_date = datetime.now().strftime("%Y-%m-%d")
-        news =  GoogleNewsSearch.search(keywords, max_results, start_date, end_date)
-        # 标准化格式
-        results = []
-        for r in news[:max_results]:
-            print(r)
-            results.append({
-                'title': r.get('title', '无标题'),
-                'url': r.get('url', '无链接'),
-                'description': r.get('description', '无摘要'),
-                'date': r.get('date', r.get('date', '')),
-                'source': r.get('source', r.get('source', ''))
-            })
-        return results
+            end_date = None
+        return GoogleNewsSearch.search(keywords, max_results, start_date, end_date)
 
 if __name__ == "__main__":
     # 测试代码
@@ -143,9 +140,8 @@ if __name__ == "__main__":
     # engines = ["ddg", "google"]
     # if SOGOU_AVAILABLE:
     #     engines.append("sogou")
-    engines = ["google"]
-    multi_engine = SearchEngine(engine=engines)
-    multi_results = multi_engine.search("商汤科技", max_results=2, start_date="2024-01-01", end_date="2024-06-01")
+    multi_engine = SearchEngine()
+    multi_results = multi_engine.search("商汤科技 行业地位 市场份额 业务模式 发展战略", max_results=2, start_date="2024-01-01", end_date="2024-06-01")
     for i, result in enumerate(multi_results, 1):
         print(f"{i}. {result['title']}")
         print(f"   URL: {result['url']}")

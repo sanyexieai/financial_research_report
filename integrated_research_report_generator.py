@@ -31,7 +31,7 @@ from utils.search_engine import SearchEngine
 class IntegratedResearchReportGenerator:
     """整合的研报生成器类"""
     
-    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK", search_engine="ddg"):
+    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK", search_engine=None):
         # 环境变量与全局配置
         load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -44,8 +44,9 @@ class IntegratedResearchReportGenerator:
         self.target_company_market = target_company_market
         
         # 搜索引擎配置
-        self.search_engine = SearchEngine(search_engine)
-        print(f"🔍 搜索引擎已配置为: {search_engine.upper()}")
+        self.search_engine = SearchEngine()
+        print(f"🔍 搜索引擎默认全部使用")
+        # print(f"🔍 搜索引擎已配置为: {search_engine.upper()}")
         
         # 目录配置
         self.data_dir = "./download_financial_statement_files"
@@ -743,7 +744,7 @@ def main():
         target_company=args.company,
         target_company_code=args.code, 
         target_company_market=args.market,
-        search_engine=args.search_engine
+        # search_engine=args.search_engine
     )
     
     # 运行完整流程

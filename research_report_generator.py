@@ -18,7 +18,8 @@ from utils.get_shareholder_info import get_shareholder_info, get_table_content
 from utils.get_financial_statements import get_all_financial_statements, save_financial_statements_to_csv
 from utils.identify_competitors import identify_competitors_with_ai
 from utils.get_stock_intro import get_stock_intro, save_stock_intro_to_txt
-from duckduckgo_search import DDGS
+# from duckduckgo_search import DDGS
+from utils.search_engine import SearchEngine
 
 # ========== 环境变量与全局配置 ==========
 load_dotenv()
@@ -162,11 +163,13 @@ all_search_results = {}
 # 1. 搜索目标公司行业信息
 print(f"\n搜索目标公司 {target_company} 的行业信息")
 target_search_keywords = f"{target_company} 行业地位 市场份额 竞争分析 业务模式"
-target_results = DDGS().text(
-    keywords=target_search_keywords,
-    region="cn-zh",
-    max_results=10
-)
+multi_engine = SearchEngine()
+target_results = multi_engine.search(target_search_keywords, max_results=10)
+# target_results = DDGS().text(
+#     keywords=target_search_keywords,
+#     region="cn-zh",
+#     max_results=10
+# )
 all_search_results[target_company] = target_results
 
 # 2. 搜索竞争对手行业信息
@@ -174,11 +177,12 @@ print(f"\n搜索竞争对手的行业信息")
 for company in listed_companies:
     company_name = company.get('name')
     search_keywords = f"{company_name} 行业地位 市场份额 业务模式 发展战略"
-    competitor_results = DDGS().text(
-        keywords=search_keywords,
-        region="cn-zh",
-        max_results=10
-    )
+    competitor_results = multi_engine.search(search_keywords, max_results=10)
+    # competitor_results = DDGS().text(
+    #     keywords=search_keywords,
+    #     region="cn-zh",
+    #     max_results=10
+    # )
     all_search_results[company_name] = competitor_results
     time.sleep(15)
 
