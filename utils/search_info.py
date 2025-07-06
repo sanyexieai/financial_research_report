@@ -4,7 +4,7 @@
 支持 DuckDuckGo 和搜狗搜索
 """
 
-from search_engine import create_search_engine
+from search_engine import SearchEngine
 
 def search_company_industry_info(company_name: str, engine: str = "sogou", max_results: int = 10):
     """
@@ -18,7 +18,7 @@ def search_company_industry_info(company_name: str, engine: str = "sogou", max_r
     Returns:
         搜索结果列表
     """
-    search_engine = create_search_engine(engine)
+    search_engine = SearchEngine(engine)
     keywords = f"{company_name}的行业地位"
     return search_engine.search(keywords, max_results)
 
