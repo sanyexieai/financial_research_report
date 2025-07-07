@@ -2,9 +2,14 @@ import os
 import time
 import yaml
 import openai
+import logging
+from datetime import datetime
 from duckduckgo_search import DDGS
 from pocketflow import Node, Flow
 from dotenv import load_dotenv
+import argparse
+
+from utils.search_engine import SearchEngine
 # 加载环境变量
 load_dotenv()
 
@@ -12,22 +17,68 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 openai.api_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
+# 配置日志
+def setup_logging():
+    """配置日志记录"""
+    os.makedirs("logs", exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"logs/industry_workflow_{timestamp}.log"
+    
+    logger = logging.getLogger('IndustryWorkflow')
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    
+    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    logger.info(f"📝 行业研究工作流日志已启动: {log_filename}")
+    return logger
+
+logger = setup_logging()
+
 class IndustryResearchFlow(Node):  # 研报生成的决策节点
     def prep(self, shared):
         context = shared.get("context", [])
+        generated_sections = shared.get("generated_sections", [])
         context_str = yaml.dump(context, allow_unicode=True)
         industry = shared["industry"]  # 行业名称
-        return industry, context_str
+        
+        # 记录已生成的章节名称
+        generated_section_names = [section.get('name', '') for section in generated_sections]
+        
+        return industry, context_str, generated_section_names
 
     def exec(self, inputs):
-        industry, context = inputs
-        print(f"\n正在分析 {industry} 行业的研究进度...")
+        industry, context, generated_section_names = inputs
+        logger.info(f"\n正在分析 {industry} 行业的研究进度...")
+        logger.info(f"已生成的章节: {generated_section_names}")
+        
         prompt = f"""
 针对 {industry} 行业研究，分析已有信息：{context}
+
+已生成的章节：{generated_section_names}
+
 请判断下一步应该：
-1) 搜索更多信息
-2) 开始生成某个章节内容
-3) 完成研报生成
+1) 搜索更多信息 - 如果信息不足
+2) 开始生成某个章节内容 - 如果信息充足且还有重要章节未生成
+3) 完成研报生成 - 如果所有重要章节都已生成
+
+重要章节清单：
+- 行业概述/行业概览
+- 市场规模分析
+- 竞争格局分析
+- 技术发展趋势
+- 政策环境分析
+- 风险与挑战
+- 发展前景预测
 
 请以 YAML 格式输出：
 ```yaml
@@ -39,18 +90,32 @@ search_terms: # 如果是search，列出要搜索的关键词列表
 section: # 如果是generate，指定要生成的章节名称
   name: 章节名称 # 如：行业生命周期/竞争格局/发展趋势等
   focus: 重点关注内容 # 具体要分析的要点
-```"""
+```
+
+注意：
+- 如果某个章节已经生成过，不要重复生成
+- 如果信息不足，优先选择search
+- 如果所有重要章节都已生成，选择complete
+"""
         resp = call_llm(prompt)
-        yaml_str = resp.split("```yaml")[1].split("```", 1)[0].strip()
-        result = yaml.safe_load(yaml_str)
+        try:
+            yaml_str = resp.split("```yaml")[1].split("```", 1)[0].strip()
+            result = yaml.safe_load(yaml_str)
+        except Exception as e:
+            logger.error(f"解析YAML失败: {e}")
+            logger.error(f"原始响应: {resp}")
+            # 默认完成
+            result = {"action": "complete", "reason": "解析失败，默认完成"}
         
         # 打印决策结果
-        print(f"决策结果: {result['action']}")
-        print(f"决策原因: {result['reason']}")
+        logger.info(f"决策结果: {result['action']}")
+        logger.info(f"决策原因: {result['reason']}")
         if result['action'] == 'search':
-            print("需要搜索的关键词:", result['search_terms'])
+            logger.info("需要搜索的关键词:", result['search_terms'])
         elif result['action'] == 'generate':
-            print(f"即将生成章节: {result['section']['name']}")
+            logger.info(f"即将生成章节: {result['section']['name']}")
+        elif result['action'] == 'complete':
+            logger.info("准备完成研报生成")
         
         return result
 
@@ -58,12 +123,12 @@ section: # 如果是generate，指定要生成的章节名称
         action = exec_res.get("action")
         if action == "search":
             shared["search_terms"] = exec_res.get("search_terms", [])
-            print("\n=== 开始信息搜索阶段 ===")
+            logger.info("\n=== 开始信息搜索阶段 ===")
         elif action == "generate":
             shared["current_section"] = exec_res.get("section", {})
-            print("\n=== 开始章节生成阶段 ===")
+            logger.info("\n=== 开始章节生成阶段 ===")
         elif action == "complete":
-            print("\n=== 开始完成研报阶段 ===")
+            logger.info("\n=== 开始完成研报阶段 ===")
         return action
 
 class SearchInfo(Node):  # 信息搜索节点
@@ -74,9 +139,9 @@ class SearchInfo(Node):  # 信息搜索节点
         all_results = []
         total = len(search_terms)
         for i, term in enumerate(search_terms, 1):
-            print(f"\n搜索关键词 ({i}/{total}): {term}")
+            logger.info(f"\n搜索关键词 ({i}/{total}): {term}")
             results = search_web(term)
-            print(f"找到 {len(list(results))} 条相关信息")
+            logger.info(f"找到 {len(list(results))} 条相关信息")
             all_results.append({"term": term, "results": results})
             time.sleep(15)  # 避免请求过快
         return all_results
@@ -85,7 +150,7 @@ class SearchInfo(Node):  # 信息搜索节点
         context_list = shared.get("context", [])
         context_list.extend(exec_res)
         shared["context"] = context_list
-        print("\n信息搜索完成，返回决策节点...")
+        logger.info("\n信息搜索完成，返回决策节点...")
         return "search_done"
 
 class GenerateSection(Node):  # 章节生成节点
@@ -98,7 +163,7 @@ class GenerateSection(Node):  # 章节生成节点
 
     def exec(self, inputs):
         industry, section, context = inputs
-        print(f"\n开始生成 {section['name']} 章节...")
+        logger.info(f"\n开始生成 {section['name']} 章节...")
         context_str = yaml.dump(context, allow_unicode=True)
         prompt = f"""
 行业：{industry}
@@ -114,10 +179,10 @@ class GenerateSection(Node):  # 章节生成节点
 5. 语言专业
 """
         content = call_llm(prompt)
-        print(f"章节 {section['name']} 生成完成!")
-        print(f"内容长度: {len(content)} 字符")
+        logger.info(f"章节 {section['name']} 生成完成!")
+        logger.info(f"内容长度: {len(content)} 字符")
         # 打印前100个字符预览
-        print(f"内容预览: {content[:100]}...")
+        logger.info(f"内容预览: {content[:100]}...")
         return {
             "name": section["name"],
             "content": content
@@ -128,7 +193,9 @@ class GenerateSection(Node):  # 章节生成节点
         sections = shared.get("generated_sections", [])
         sections.append(exec_res)
         shared["generated_sections"] = sections
-        print("\n返回决策节点，继续分析下一步...")
+        logger.info(f"\n章节 {exec_res['name']} 已添加到生成列表")
+        logger.info(f"当前已生成 {len(sections)} 个章节")
+        logger.info("\n返回决策节点，继续分析下一步...")
         return "continue"
 
 class CompleteReport(Node):  # 研报完成节点
@@ -140,37 +207,56 @@ class CompleteReport(Node):  # 研报完成节点
 
     def exec(self, inputs):
         industry, sections = inputs
-        print(f"\n=== 开始整合最终研报 ===")
+        logger.info(f"\n=== 开始整合最终研报 ===")
         # 整合所有章节内容
         content = f"# {industry}行业研究报告\n\n"
         for section in sections:
-            print(f"添加章节: {section['name']}")
+            logger.info(f"添加章节: {section['name']}")
             content += f"\n## {section['name']}\n\n{section['content']}\n"
         return content
 
     def post(self, shared, prep_res, exec_res):
-        print(f"\n=== 研报生成完成！===")
-        print(f"研报已保存到 '研报2.md' 文件中")
+        logger.info(f"\n=== 研报生成完成！===")
+        logger.info(f"研报已保存到 '研报2.md' 文件中")
         shared["report"] = exec_res
         return None
 
 def call_llm(prompt: str) -> str:
-    response = openai.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4"),
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7
-    )
-    return response.choices[0].message.content.strip()
+    try:
+        response = openai.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4"),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"LLM调用失败: {e}")
+        return ""
 
-def search_web(term: str):
-    with DDGS() as ddgs:
-        results = ddgs.text(keywords=term, region="cn-zh", max_results=20)
+def search_web(term: str, force_refresh: bool = False):
+    # with DDGS() as ddgs:
+    #     results = ddgs.text(keywords=term, region="cn-zh", max_results=20)
+    multi_engine = SearchEngine()
+    results = multi_engine.search(term, max_results=10, force_refresh=force_refresh)
     return results
 
 """
 示例用法
 """
 if __name__ == "__main__":
+    # 添加命令行参数支持
+    parser = argparse.ArgumentParser(description='行业研究工作流')
+    parser.add_argument('--industry', default='智能风控&大数据征信服务', 
+                       help='目标行业名称')
+    parser.add_argument('--output-file', default=None,
+                       help='输出文件名 (默认: 自动生成带时间戳的文件名)')
+    parser.add_argument('--max-iterations', type=int, default=10,
+                       help='最大迭代次数，防止无限循环')
+    parser.add_argument('--force-refresh', action='store_true',
+                       help='强制刷新搜索缓存')
+    
+    args = parser.parse_args()
+    
     # 构建工作流
     research = IndustryResearchFlow()
     search = SearchInfo()
@@ -186,10 +272,33 @@ if __name__ == "__main__":
     
     # 运行工作流
     flow = Flow(start=research)
-    shared_state = {"industry": "智能风控&大数据征信服务"}
+    shared_state = {
+        "industry": args.industry,
+        "max_iterations": args.max_iterations,
+        "current_iteration": 0,
+        "force_refresh": args.force_refresh
+    }
+    
+    logger.info(f"🚀 开始行业研究工作流")
+    logger.info(f"📊 目标行业: {args.industry}")
+    logger.info(f"🔄 最大迭代次数: {args.max_iterations}")
+    if args.force_refresh:
+        logger.info("🔄 强制刷新搜索缓存")
+    
     result = flow.run(shared_state)
     
     # 保存结果
     if result:
-        with open("研报2.md", "w", encoding="utf-8") as f:
+        if args.output_file:
+            output_filename = args.output_file
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_filename = f"{args.industry.replace('&', '_').replace(' ', '_')}_行业研报_{timestamp}.md"
+        
+        with open(output_filename, "w", encoding="utf-8") as f:
             f.write(result)
+        
+        logger.info(f"\n✅ 行业研报生成完成！")
+        logger.info(f"📁 输出文件: {output_filename}")
+    else:
+        logger.error("❌ 研报生成失败")

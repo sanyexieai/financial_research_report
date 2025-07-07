@@ -3,6 +3,8 @@
 import os
 import json
 import yaml
+import logging
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from .utils.create_session_dir import create_session_output_dir
 from .utils.format_execution_result import format_execution_result
@@ -46,6 +48,44 @@ class DataAnalysisAgent:
         self.session_output_dir = None
         self.executor = None
         self.absolute_path = absolute_path
+        
+        # 初始化日志记录器
+        self.setup_logging()
+
+    def setup_logging(self):
+        """配置日志记录"""
+        # 创建logs目录
+        os.makedirs("logs", exist_ok=True)
+        
+        # 生成日志文件名（包含时间戳）
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = f"logs/data_analysis_agent_{timestamp}.log"
+        
+        # 配置日志记录器
+        self.logger = logging.getLogger('DataAnalysisAgent')
+        self.logger.setLevel(logging.INFO)
+        
+        # 清除已有的处理器
+        self.logger.handlers.clear()
+        
+        # 创建文件处理器
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        
+        # 创建控制台处理器
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # 创建格式化器
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        # 添加处理器到记录器
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+        
+        self.logger.info(f"📝 数据分析智能体日志记录已启动，日志文件: {log_filename}")
 
     def _process_response(self, response: str) -> Dict[str, Any]:
         """
@@ -61,7 +101,7 @@ class DataAnalysisAgent:
             yaml_data = self.llm.parse_yaml_response(response)
             action = yaml_data.get('action', 'generate_code')
             
-            print(f"🎯 检测到动作: {action}")
+            self.logger.info(f"🎯 检测到动作: {action}")
             
             if action == 'analysis_complete':
                 return self._handle_analysis_complete(response, yaml_data)
@@ -70,16 +110,16 @@ class DataAnalysisAgent:
             elif action == 'generate_code':
                 return self._handle_generate_code(response, yaml_data)
             else:
-                print(f"⚠️ 未知动作类型: {action}，按generate_code处理")
+                self.logger.warning(f"⚠️ 未知动作类型: {action}，按generate_code处理")
                 return self._handle_generate_code(response, yaml_data)
                 
         except Exception as e:
-            print(f"⚠️ 解析响应失败: {str(e)}，按generate_code处理")
+            self.logger.error(f"⚠️ 解析响应失败: {str(e)}，按generate_code处理")
             return self._handle_generate_code(response, {})
     
     def _handle_analysis_complete(self, response: str, yaml_data: Dict[str, Any]) -> Dict[str, Any]:
         """处理分析完成动作"""
-        print("✅ 分析任务完成")
+        self.logger.info("✅ 分析任务完成")
         final_report = yaml_data.get('final_report', '分析完成，无最终报告')
         return {
             'action': 'analysis_complete',
@@ -90,10 +130,11 @@ class DataAnalysisAgent:
     
     def _handle_collect_figures(self, response: str, yaml_data: Dict[str, Any]) -> Dict[str, Any]:
         """处理图片收集动作"""
-        print("📊 开始收集图片")
+        self.logger.info("📊 开始收集图片")
         figures_to_collect = yaml_data.get('figures_to_collect', [])
         
         collected_figures = []
+        missing_figures = []
         
         for figure_info in figures_to_collect:
             figure_number = figure_info.get('figure_number')
@@ -102,14 +143,14 @@ class DataAnalysisAgent:
             description = figure_info.get('description', '')
             analysis = figure_info.get('analysis', '')
             
-            print(f"📈 收集图片 {figure_number}: {filename}")
-            print(f"   📂 路径: {file_path}")
-            print(f"   📝 描述: {description}")
-            print(f"   🔍 分析: {analysis}")
+            self.logger.info(f"📈 收集图片 {figure_number}: {filename}")
+            self.logger.info(f"   📂 路径: {file_path}")
+            self.logger.info(f"   📝 描述: {description}")
+            self.logger.info(f"   🔍 分析: {analysis}")
             
             # 只保留真实存在的图片
             if file_path and os.path.exists(file_path):
-                print(f"   ✅ 文件存在: {file_path}")
+                self.logger.info(f"   ✅ 文件存在: {file_path}")
                 collected_figures.append({
                     'figure_number': figure_number,
                     'filename': filename,
@@ -118,10 +159,35 @@ class DataAnalysisAgent:
                     'analysis': analysis
                 })
             elif file_path:
-                print(f"   ⚠️ 文件不存在: {file_path}，已跳过该图片")
+                self.logger.warning(f"   ⚠️ 文件不存在: {file_path}，已跳过该图片")
+                missing_figures.append({
+                    'figure_number': figure_number,
+                    'filename': filename,
+                    'file_path': file_path,
+                    'description': description,
+                    'analysis': analysis
+                })
             else:
-                print(f"   ⚠️ 未提供文件路径，已跳过该图片")
+                self.logger.warning(f"   ⚠️ 未提供文件路径，已跳过该图片")
+                missing_figures.append({
+                    'figure_number': figure_number,
+                    'filename': filename,
+                    'file_path': '',
+                    'description': description,
+                    'analysis': analysis
+                })
         
+        # 记录图片收集失败的详细信息
+        if missing_figures:
+            self.logger.error("=" * 80)
+            self.logger.error("🚨 图片收集失败详细记录")
+            self.logger.error("=" * 80)
+            self.logger.error(f"📋 当前轮数: {self.current_round}")
+            self.logger.error(f"📁 会话输出目录: {self.session_output_dir}")
+            self.logger.error(f"🤖 智能体提示词:\n{self._build_conversation_prompt()}")
+            self.logger.error(f"📤 智能体返回值:\n{response}")
+            self.logger.error(f"❌ 缺失的图片信息: {missing_figures}")
+            self.logger.error("=" * 80)
         
         return {
             'action': 'collect_figures',
@@ -135,19 +201,27 @@ class DataAnalysisAgent:
         if not code:
             code = extract_code_from_response(response)
         if code:
-            print(f"🔧 执行代码:\n{code}")
-            print("-" * 40)
+            self.logger.info(f"🔧 执行代码:\n{code}")
+            self.logger.info("-" * 40)
             result = self.executor.execute_code(code)
             feedback = format_execution_result(result)
-            print(f"📋 执行反馈:\n{feedback}")
+            self.logger.info(f"📋 执行反馈:\n{feedback}")
+            
             # 检查代码执行结果中是否有图片生成但文件不存在的情况
-            # 假设图片保存路径会在 result['output'] 或 result['figures'] 里体现
-            # 如果检测到图片文件不存在，建议用户重新分析
             missing_figures = []
             output = result.get('output', '')
+            error = result.get('error', '')
+            
+            # 记录代码执行结果
+            self.logger.info(f"📊 代码执行结果 - 输出: {output}")
+            if error:
+                self.logger.error(f"❌ 代码执行错误: {error}")
+            
             # 简单正则或字符串查找图片路径并判断是否存在
             import re
             img_paths = re.findall(r'(?:[\w./\\-]+\.(?:png|jpg|jpeg|svg))', str(output))
+            self.logger.info(f"🔍 检测到的图片路径: {img_paths}")
+            
             for img_path in img_paths:
                 if not os.path.isabs(img_path):
                     abs_path = os.path.join(self.session_output_dir, img_path)
@@ -155,7 +229,25 @@ class DataAnalysisAgent:
                     abs_path = img_path
                 if not os.path.exists(abs_path):
                     missing_figures.append(img_path)
+                    self.logger.error(f"❌ 图片文件不存在: {abs_path}")
+                else:
+                    self.logger.info(f"✅ 图片文件存在: {abs_path}")
+            
             if missing_figures:
+                # 记录图片生成失败的详细信息
+                self.logger.error("=" * 80)
+                self.logger.error("🚨 图片生成失败详细记录")
+                self.logger.error("=" * 80)
+                self.logger.error(f"📋 当前轮数: {self.current_round}")
+                self.logger.error(f"📁 会话输出目录: {self.session_output_dir}")
+                self.logger.error(f"🔧 执行的代码:\n{code}")
+                self.logger.error(f"🤖 智能体提示词:\n{self._build_conversation_prompt()}")
+                self.logger.error(f"📤 智能体返回值:\n{response}")
+                self.logger.error(f"📊 代码执行结果:\n{result}")
+                self.logger.error(f"❌ 缺失的图片文件: {missing_figures}")
+                self.logger.error(f"⚠️ 执行错误信息: {error}")
+                self.logger.error("=" * 80)
+                
                 feedback += f"\n⚠️ 检测到以下图片未生成成功: {missing_figures}\n建议重新分析本轮或修正代码后再试。"
                 # 可以在这里返回一个特殊标志，供 analyze 主流程判断是否需要重启分析
                 return {
@@ -177,7 +269,8 @@ class DataAnalysisAgent:
                 'continue': True
             }
         else:
-            print("⚠️ 未从响应中提取到可执行代码，要求LLM重新生成")
+            self.logger.warning("⚠️ 未从响应中提取到可执行代码，要求LLM重新生成")
+            self.logger.error(f"❌ 无效响应内容:\n{response}")
             return {
                 'action': 'invalid_response',
                 'error': '响应中缺少可执行代码',
@@ -215,13 +308,13 @@ class DataAnalysisAgent:
         if files:
             initial_prompt += f"\n数据文件: {', '.join(files)}"
         
-        print(f"🚀 开始数据分析任务")
-        print(f"📝 用户需求: {user_input}")
+        self.logger.info(f"🚀 开始数据分析任务")
+        self.logger.info(f"📝 用户需求: {user_input}")
         if files:
-            print(f"📁 数据文件: {', '.join(files)}")
-        print(f"📂 输出目录: {self.session_output_dir}")
-        print(f"🔢 最大轮数: {self.max_rounds}")
-        print("=" * 60)
+            self.logger.info(f"📁 数据文件: {', '.join(files)}")
+        self.logger.info(f"📂 输出目录: {self.session_output_dir}")
+        self.logger.info(f"🔢 最大轮数: {self.max_rounds}")
+        self.logger.info("=" * 60)
           # 添加到对话历史
         self.conversation_history.append({
             'role': 'user',
@@ -230,7 +323,7 @@ class DataAnalysisAgent:
         
         while self.current_round < self.max_rounds:
             self.current_round += 1
-            print(f"\n🔄 第 {self.current_round} 轮分析")
+            self.logger.info(f"\n🔄 第 {self.current_round} 轮分析")
               # 调用LLM生成响应
             try:                
                 # 获取当前执行环境的变量信息
@@ -246,14 +339,14 @@ class DataAnalysisAgent:
                     system_prompt=formatted_system_prompt
                 )
                 
-                print(f"🤖 助手响应:\n{response}")
+                self.logger.info(f"🤖 助手响应:\n{response}")
                 
                 # 使用统一的响应处理方法
                 process_result = self._process_response(response)
                 
                 # 根据处理结果决定是否继续
                 if not process_result.get('continue', True):
-                    print(f"\n✅ 分析完成！")
+                    self.logger.info(f"\n✅ 分析完成！")
                     break
                 
                 # 添加到对话历史
@@ -297,14 +390,14 @@ class DataAnalysisAgent:
            
             except Exception as e:
                 error_msg = f"LLM调用错误: {str(e)}"
-                print(f"❌ {error_msg}")
+                self.logger.error(f"❌ {error_msg}")
                 self.conversation_history.append({
                     'role': 'user',
                     'content': f"发生错误: {error_msg}，请重新生成代码。"
                 })
         # 生成最终总结
         if self.current_round >= self.max_rounds:
-            print(f"\n⚠️ 已达到最大轮数 ({self.max_rounds})，分析结束")
+            self.logger.warning(f"\n⚠️ 已达到最大轮数 ({self.max_rounds})，分析结束")
         
         return self._generate_final_report()
     
@@ -330,10 +423,10 @@ class DataAnalysisAgent:
             if result.get('action') == 'collect_figures':
                 all_figures.extend(result.get('collected_figures', []))
         
-        print(f"\n📊 开始生成最终分析报告...")
-        print(f"📂 输出目录: {self.session_output_dir}")
-        print(f"🔢 总轮数: {self.current_round}")
-        print(f"📈 收集图片: {len(all_figures)} 个")
+        self.logger.info(f"\n📊 开始生成最终分析报告...")
+        self.logger.info(f"📂 输出目录: {self.session_output_dir}")
+        self.logger.info(f"🔢 总轮数: {self.current_round}")
+        self.logger.info(f"📈 收集图片: {len(all_figures)} 个")
         
         # 构建用于生成最终报告的提示词
         final_report_prompt = self._build_final_report_prompt(all_figures)
@@ -342,7 +435,7 @@ class DataAnalysisAgent:
         response = self.llm.call(
             prompt=final_report_prompt,
             system_prompt="你将会接收到一个数据分析任务的最终报告请求，请根据提供的分析结果和图片信息生成完整的分析报告。",
-            max_tokens=16384  
+            max_tokens=8192  
         )
         
         # 解析响应，提取最终报告
@@ -356,7 +449,7 @@ class DataAnalysisAgent:
             # 如果解析失败，直接使用响应内容
             final_report_content = response
         
-        print("✅ 最终报告生成完成")
+        self.logger.info("✅ 最终报告生成完成")
         # 手动添加附件清单到报告末尾
         if all_figures:
             appendix_section = "\n\n## 附件清单\n\n"
@@ -385,11 +478,11 @@ class DataAnalysisAgent:
         try:
             with open(report_file_path, 'w', encoding='utf-8') as f:
                 f.write(final_report_content)
-            print(f"📄 最终报告已保存至: {report_file_path}")
+            self.logger.info(f"📄 最终报告已保存至: {report_file_path}")
             if all_figures:
-                print(f"📎 已添加 {len(all_figures)} 个图片的附件清单")
+                self.logger.info(f"📎 已添加 {len(all_figures)} 个图片的附件清单")
         except Exception as e:
-            print(f"❌ 保存报告文件失败: {str(e)}")
+            self.logger.error(f"❌ 保存报告文件失败: {str(e)}")
         
         # 返回完整的分析结果
         return {

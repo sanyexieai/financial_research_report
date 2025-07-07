@@ -5,6 +5,8 @@ import openai
 from duckduckgo_search import DDGS
 from pocketflow import Node, Flow
 from dotenv import load_dotenv
+
+from utils.search_engine import SearchEngine
 # 加载环境变量
 load_dotenv()
 
@@ -201,8 +203,10 @@ def call_llm(prompt: str) -> str:
     return response.choices[0].message.content.strip()
 
 def search_web(term: str):
-    with DDGS() as ddgs:
-        results = ddgs.text(keywords=term, region="cn-zh", max_results=20)
+    # with DDGS() as ddgs:
+    #     results = ddgs.text(keywords=term, region="cn-zh", max_results=20)
+    multi_engine = SearchEngine()
+    results = multi_engine.search(term, max_results=10)
     return results
 
 """

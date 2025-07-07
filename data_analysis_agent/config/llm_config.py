@@ -22,7 +22,7 @@ class LLMConfig:
     base_url: str = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
     model: str = os.environ.get("OPENAI_MODEL", "gpt-4-turbo-preview")
     temperature: float = 0.1
-    max_tokens: int = 16384
+    max_tokens: int = 8192
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
