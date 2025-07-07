@@ -87,8 +87,8 @@ reason: 做出此判断的原因
 search_terms: # 如果是search，列出要搜索的关键词列表
   - 关键词1 
   - 关键词2
-section: # 如果是generate，指定要生成的章节名称
-  name: 章节名称 # 如：行业生命周期/竞争格局/发展趋势等
+section: # 如果是generate，指定要生成的单个章节
+  name: 章节名称 # 如：行业概述/市场规模分析/竞争格局分析等
   focus: 重点关注内容 # 具体要分析的要点
 ```
 
@@ -96,6 +96,8 @@ section: # 如果是generate，指定要生成的章节名称
 - 如果某个章节已经生成过，不要重复生成
 - 如果信息不足，优先选择search
 - 如果所有重要章节都已生成，选择complete
+- section字段必须是一个单个章节的字典，包含name和focus字段
+- 不要返回章节列表，只返回一个要生成的章节
 """
         resp = call_llm(prompt)
         try:
@@ -111,9 +113,17 @@ section: # 如果是generate，指定要生成的章节名称
         logger.info(f"决策结果: {result['action']}")
         logger.info(f"决策原因: {result['reason']}")
         if result['action'] == 'search':
-            logger.info("需要搜索的关键词:", result['search_terms'])
+            search_terms = result.get('search_terms', [])
+            if isinstance(search_terms, list):
+                logger.info(f"需要搜索的关键词: {search_terms}")
+            else:
+                logger.warning(f"搜索关键词格式错误: {search_terms}")
         elif result['action'] == 'generate':
-            logger.info(f"即将生成章节: {result['section']['name']}")
+            section = result.get('section', {})
+            if isinstance(section, dict) and 'name' in section:
+                logger.info(f"即将生成章节: {section['name']}")
+            else:
+                logger.warning(f"章节信息格式错误: {section}")
         elif result['action'] == 'complete':
             logger.info("准备完成研报生成")
         
@@ -122,11 +132,36 @@ section: # 如果是generate，指定要生成的章节名称
     def post(self, shared, prep_res, exec_res):
         action = exec_res.get("action")
         if action == "search":
-            shared["search_terms"] = exec_res.get("search_terms", [])
-            logger.info("\n=== 开始信息搜索阶段 ===")
+            search_terms = exec_res.get("search_terms", [])
+            if isinstance(search_terms, list):
+                shared["search_terms"] = search_terms
+                logger.info("\n=== 开始信息搜索阶段 ===")
+            else:
+                logger.error(f"搜索关键词格式错误: {search_terms}")
+                return "complete"  # 出错时直接完成
         elif action == "generate":
-            shared["current_section"] = exec_res.get("section", {})
-            logger.info("\n=== 开始章节生成阶段 ===")
+            section = exec_res.get("section", {})
+            if isinstance(section, dict) and 'name' in section:
+                # 单个章节的情况
+                shared["current_section"] = section
+                logger.info("\n=== 开始章节生成阶段 ===")
+            elif isinstance(section, list) and len(section) > 0:
+                # 章节列表的情况，选择第一个未生成的章节
+                generated_sections = shared.get("generated_sections", [])
+                generated_names = [s.get('name', '') for s in generated_sections]
+                
+                for s in section:
+                    if isinstance(s, dict) and 'name' in s and s['name'] not in generated_names:
+                        shared["current_section"] = s
+                        logger.info(f"\n=== 开始章节生成阶段: {s['name']} ===")
+                        break
+                else:
+                    # 所有章节都已生成
+                    logger.info("所有章节都已生成，转为完成状态")
+                    return "complete"
+            else:
+                logger.error(f"章节信息格式错误: {section}")
+                return "complete"  # 出错时直接完成
         elif action == "complete":
             logger.info("\n=== 开始完成研报阶段 ===")
         return action
@@ -163,12 +198,23 @@ class GenerateSection(Node):  # 章节生成节点
 
     def exec(self, inputs):
         industry, section, context = inputs
+        
+        # 安全检查section格式
+        if not isinstance(section, dict) or 'name' not in section:
+            logger.error(f"章节信息格式错误: {section}")
+            return {
+                "name": "错误章节",
+                "content": f"章节信息格式错误: {section}"
+            }
+        
         logger.info(f"\n开始生成 {section['name']} 章节...")
         context_str = yaml.dump(context, allow_unicode=True)
+        focus = section.get('focus', '综合分析')
+        
         prompt = f"""
 行业：{industry}
 章节：{section['name']}
-重点：{section['focus']}
+重点：{focus}
 参考资料：{context_str}
 
 请生成一个专业、详实的研报章节。要求：
@@ -217,20 +263,22 @@ class CompleteReport(Node):  # 研报完成节点
 
     def post(self, shared, prep_res, exec_res):
         logger.info(f"\n=== 研报生成完成！===")
-        logger.info(f"研报已保存到 '研报2.md' 文件中")
         shared["report"] = exec_res
-        return None
+        return exec_res  # 返回研报内容而不是None
 
 def call_llm(prompt: str) -> str:
     try:
+        logger.info("🤖 正在调用LLM...")
         response = openai.chat.completions.create(
             model=os.getenv("OPENAI_MODEL", "gpt-4"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7
         )
-        return response.choices[0].message.content.strip()
+        result = response.choices[0].message.content.strip()
+        logger.info(f"✅ LLM调用成功，返回长度: {len(result)}")
+        return result
     except Exception as e:
-        logger.error(f"LLM调用失败: {e}")
+        logger.error(f"❌ LLM调用失败: {e}")
         return ""
 
 def search_web(term: str, force_refresh: bool = False):
@@ -239,6 +287,30 @@ def search_web(term: str, force_refresh: bool = False):
     multi_engine = SearchEngine()
     results = multi_engine.search(term, max_results=10, force_refresh=force_refresh)
     return results
+
+def test_workflow():
+    """测试工作流基本功能"""
+    logger.info("🧪 开始测试工作流...")
+    
+    # 测试LLM调用
+    test_prompt = "请简单回答：1+1等于几？"
+    result = call_llm(test_prompt)
+    if result:
+        logger.info(f"✅ LLM测试成功: {result}")
+    else:
+        logger.error("❌ LLM测试失败")
+        return False
+    
+    # 测试搜索功能
+    try:
+        results = search_web("测试搜索", force_refresh=True)
+        logger.info(f"✅ 搜索测试成功，找到 {len(list(results))} 条结果")
+    except Exception as e:
+        logger.error(f"❌ 搜索测试失败: {e}")
+        return False
+    
+    logger.info("✅ 所有测试通过")
+    return True
 
 """
 示例用法
@@ -254,8 +326,15 @@ if __name__ == "__main__":
                        help='最大迭代次数，防止无限循环')
     parser.add_argument('--force-refresh', action='store_true',
                        help='强制刷新搜索缓存')
+    parser.add_argument('--test', action='store_true',
+                       help='仅运行测试，不执行完整工作流')
     
     args = parser.parse_args()
+    
+    # 如果只是测试
+    if args.test:
+        test_workflow()
+        exit(0)
     
     # 构建工作流
     research = IndustryResearchFlow()
@@ -302,3 +381,8 @@ if __name__ == "__main__":
         logger.info(f"📁 输出文件: {output_filename}")
     else:
         logger.error("❌ 研报生成失败")
+        logger.error("可能的原因：")
+        logger.error("1. LLM调用失败")
+        logger.error("2. YAML解析失败")
+        logger.error("3. 工作流逻辑错误")
+        logger.error("建议运行 --test 参数进行诊断")
