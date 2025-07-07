@@ -55,3 +55,14 @@ ipython>=7.0.0
 # pytest>=6.0.0
 # black>=21.0.0
 # flake8>=3.9.0
+loguru~=0.7.3
+# ========== MCP Client ==========
+
+marshmallow~=3.21.3
+mistune~=3.0.2
+fastmcp
+# mcp>=1.2.0  <- 旧的版本要求
+mcp==1.6
+mock~=5.1.0
+multidict~=6.0.5
+httpx
