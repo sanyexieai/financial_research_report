@@ -206,3 +206,5 @@ cache/
 # 数据文件
 *.csv
 *.xlsx
+search_cache/*
+智能风控_大数据征信服务_行业研报_*.md

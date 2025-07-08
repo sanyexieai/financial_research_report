@@ -41,7 +41,7 @@ llm_config = LLMConfig(
     base_url=base_url,
     model=model,
     temperature=0.7,
-    max_tokens=16384,
+    max_tokens=8192,
 )
 llm = LLMHelper(llm_config)
 
@@ -207,7 +207,7 @@ company_infos = get_company_infos(company_info_dir)
 company_infos = llm.call(
     f"请整理以下公司信息内容，确保格式清晰易读，并保留关键信息：\n{company_infos}",
     system_prompt="你是一个专业的公司信息整理师。",
-    max_tokens=16384,
+    max_tokens=8192,
     temperature=0.5
 )
 
@@ -218,7 +218,7 @@ table_content = get_table_content(shangtang_shareholder_info)
 shareholder_analysis = llm.call(
     "请分析以下股东信息表格内容：\n" + table_content,
     system_prompt="你是一个专业的股东信息分析师。",
-    max_tokens=16384,
+    max_tokens=8192,
     temperature=0.5
 )
 

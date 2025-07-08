@@ -13,6 +13,7 @@ import yaml
 import re
 import shutil
 import requests
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 import importlib
@@ -31,22 +32,27 @@ from utils.search_engine import SearchEngine
 class IntegratedResearchReportGenerator:
     """整合的研报生成器类"""
     
-    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK", search_engine=None):
+    def __init__(self, target_company="商汤科技", target_company_code="00020", target_company_market="HK", search_engine="all"):
+        # 配置日志记录
+        self.setup_logging()
+        
         # 环境变量与全局配置
         load_dotenv()
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.model = os.getenv("OPENAI_MODEL", "gpt-4")
         # 打印模型
-        print(f"🔧 使用的模型: {self.model}")
+        self.logger.info(f"🔧 使用的模型: {self.model}")
         self.target_company = target_company
         self.target_company_code = target_company_code
         self.target_company_market = target_company_market
         
         # 搜索引擎配置
         self.search_engine = SearchEngine()
-        print(f"🔍 搜索引擎默认全部使用")
-        # print(f"🔍 搜索引擎已配置为: {search_engine.upper()}")
+        if search_engine and search_engine != "all":
+            self.logger.info(f"🔍 搜索引擎已配置为: {search_engine.upper()}")
+        else:
+            self.logger.info(f"🔍 搜索引擎默认全部使用")
         
         # 目录配置
         self.data_dir = "./download_financial_statement_files"
@@ -63,21 +69,56 @@ class IntegratedResearchReportGenerator:
             base_url=self.base_url,
             model=self.model,
             temperature=0.7,
-            max_tokens=16384,
+            max_tokens=8192,
         )
         self.llm = LLMHelper(self.llm_config)
         
         # 存储分析结果
         self.analysis_results = {}
     
+    def setup_logging(self):
+        """配置日志记录"""
+        # 创建logs目录
+        os.makedirs("logs", exist_ok=True)
+        
+        # 生成日志文件名（包含时间戳）
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = f"logs/financial_research_{timestamp}.log"
+        
+        # 配置日志记录器
+        self.logger = logging.getLogger('FinancialResearch')
+        self.logger.setLevel(logging.INFO)
+        
+        # 清除已有的处理器
+        self.logger.handlers.clear()
+        
+        # 创建文件处理器
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        
+        # 创建控制台处理器
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # 创建格式化器
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        # 添加处理器到记录器
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+        
+        self.logger.info(f"📝 日志记录已启动，日志文件: {log_filename}")
+    
     def stage1_data_collection(self):
         """第一阶段：数据采集与基础分析"""
-        print("\n" + "="*80)
-        print("🚀 开始第一阶段：数据采集与基础分析")
-        print("="*80)
+        self.logger.info("\n" + "="*80)
+        self.logger.info("🚀 开始第一阶段：数据采集与基础分析")
+        self.logger.info("="*80)
         
         # 1. 获取竞争对手列表
-        print("🔍 识别竞争对手...")
+        self.logger.info("🔍 识别竞争对手...")
         other_companies = identify_competitors_with_ai(
             api_key=self.api_key,
             base_url=self.base_url,
@@ -87,7 +128,7 @@ class IntegratedResearchReportGenerator:
         listed_companies = [company for company in other_companies if company.get('market') != "未上市"]
         
         # 2. 获取目标公司财务数据
-        print(f"\n📊 获取目标公司 {self.target_company} 的财务数据...")
+        self.logger.info(f"\n📊 获取目标公司 {self.target_company} 的财务数据...")
         target_financials = get_all_financial_statements(
             stock_code=self.target_company_code,
             market=self.target_company_market,
@@ -104,7 +145,7 @@ class IntegratedResearchReportGenerator:
         )
         
         # 3. 获取竞争对手的财务数据
-        print("\n📊 获取竞争对手的财务数据...")
+        self.logger.info("\n📊 获取竞争对手的财务数据...")
         competitors_financials = {}
         for company in listed_companies:
             company_name = company.get('name')
@@ -121,7 +162,7 @@ class IntegratedResearchReportGenerator:
             elif "港" in market_str:
                 market = "HK"
             
-            print(f"  获取 {company_name}({market}:{company_code}) 的财务数据")
+            self.logger.info(f"  获取 {company_name}({market}:{company_code}) 的财务数据")
             try:
                 company_financials = get_all_financial_statements(
                     stock_code=company_code,
@@ -140,10 +181,10 @@ class IntegratedResearchReportGenerator:
                 competitors_financials[company_name] = company_financials
                 time.sleep(2)
             except Exception as e:
-                print(f"  获取 {company_name} 财务数据失败: {e}")
+                self.logger.error(f"  获取 {company_name} 财务数据失败: {e}")
         
         # 4. 获取公司基础信息
-        print("\n🏢 获取公司基础信息...")
+        self.logger.info("\n🏢 获取公司基础信息...")
         all_base_info_targets = [(self.target_company, self.target_company_code, self.target_company_market)]
         
         for company in listed_companies:
@@ -165,22 +206,22 @@ class IntegratedResearchReportGenerator:
         all_base_info_targets.append(("百度", "09888", "HK"))
         
         for company_name, company_code, market in all_base_info_targets:
-            print(f"  获取 {company_name}({market}:{company_code}) 的基础信息")
+            self.logger.info(f"  获取 {company_name}({market}:{company_code}) 的基础信息")
             company_info = get_stock_intro(company_code, market=market)
             if company_info:
                 save_path = os.path.join(self.company_info_dir, f"{company_name}_{market}_{company_code}_info.txt")
                 save_stock_intro_to_txt(company_code, market, save_path)
-                print(f"    信息已保存到: {save_path}")
+                self.logger.info(f"    信息已保存到: {save_path}")
             else:
-                print(f"    未能获取到 {company_name} 的基础信息")
+                self.logger.warning(f"    未能获取到 {company_name} 的基础信息")
             time.sleep(1)
         
         # 5. 搜索行业信息
-        print("\n🔍 搜索行业信息...")
+        self.logger.info("\n🔍 搜索行业信息...")
         all_search_results = {}
           # 搜索目标公司行业信息
         target_search_keywords = f"{self.target_company} 行业地位 市场份额 竞争分析 业务模式"
-        print(f"  正在搜索: {target_search_keywords}")
+        self.logger.info(f"  正在搜索: {target_search_keywords}")
         # 进行目标公司搜索
         target_results = self.search_engine.search(target_search_keywords, 10)
         all_search_results[self.target_company] = target_results
@@ -189,7 +230,7 @@ class IntegratedResearchReportGenerator:
         for company in listed_companies:
             company_name = company.get('name')
             search_keywords = f"{company_name} 行业地位 市场份额 业务模式 发展战略"
-            print(f"  正在搜索: {search_keywords}")
+            self.logger.info(f"  正在搜索: {search_keywords}")
             competitor_results = self.search_engine.search(search_keywords, 10)
             all_search_results[company_name] = competitor_results
             # 增加延迟避免请求过于频繁
@@ -201,7 +242,7 @@ class IntegratedResearchReportGenerator:
             json.dump(all_search_results, f, ensure_ascii=False, indent=2)
         
         # 6. 运行财务分析
-        print("\n📈 运行财务分析...")
+        self.logger.info("\n📈 运行财务分析...")
         
         # 单公司分析
         results = self.analyze_companies_in_directory(self.data_dir, self.llm_config)
@@ -221,14 +262,14 @@ class IntegratedResearchReportGenerator:
             sensetime_valuation_report = self.analyze_sensetime_valuation(sensetime_files, self.llm_config)
         
         # 7. 整理所有分析结果
-        print("\n📋 整理分析结果...")
+        self.logger.info("\n📋 整理分析结果...")
         
         # 整理公司信息
         company_infos = self.get_company_infos(self.company_info_dir)
         company_infos = self.llm.call(
             f"请整理以下公司信息内容，确保格式清晰易读，并保留关键信息：\n{company_infos}",
             system_prompt="你是一个专业的公司信息整理师。",
-            max_tokens=16384,
+            max_tokens=8192,
             temperature=0.5
         )
         
@@ -239,7 +280,7 @@ class IntegratedResearchReportGenerator:
         shareholder_analysis = self.llm.call(
             "请分析以下股东信息表格内容：\n" + table_content,
             system_prompt="你是一个专业的股东信息分析师。",
-            max_tokens=16384,
+            max_tokens=8192,
             temperature=0.5
         )
         
@@ -269,7 +310,7 @@ class IntegratedResearchReportGenerator:
             if sensetime_valuation_report and isinstance(sensetime_valuation_report, dict):
                 f.write(f"# 商汤科技估值与预测分析\n\n{sensetime_valuation_report.get('final_report', '未生成报告')}\n\n")
         
-        print(f"\n✅ 第一阶段完成！基础分析报告已保存到: {md_output_file}")
+        self.logger.info(f"\n✅ 第一阶段完成！基础分析报告已保存到: {md_output_file}")
         
         # 存储结果供第二阶段使用
         self.analysis_results = {
@@ -285,12 +326,12 @@ class IntegratedResearchReportGenerator:
     
     def stage2_deep_report_generation(self, md_file_path):
         """第二阶段：深度研报生成"""
-        print("\n" + "="*80)
-        print("🚀 开始第二阶段：深度研报生成")
-        print("="*80)
+        self.logger.info("\n" + "="*80)
+        self.logger.info("🚀 开始第二阶段：深度研报生成")
+        self.logger.info("="*80)
         
         # 处理图片路径
-        print("🖼️ 处理图片路径...")
+        self.logger.info("🖼️ 处理图片路径...")
         new_md_path = md_file_path.replace('.md', '_images.md')
         images_dir = os.path.join(os.path.dirname(md_file_path), 'images')
         self.extract_images_from_markdown(md_file_path, images_dir, new_md_path)
@@ -300,23 +341,23 @@ class IntegratedResearchReportGenerator:
         background = self.get_background()
         
         # 生成大纲
-        print("\n📋 生成报告大纲...")
+        self.logger.info("\n📋 生成报告大纲...")
         parts = self.generate_outline(self.llm, background, report_content)
         
         # 分段生成深度研报
-        print("\n✍️ 开始分段生成深度研报...")
+        self.logger.info("\n✍️ 开始分段生成深度研报...")
         full_report = ['# 商汤科技公司研报\n']
         prev_content = ''
         
         for idx, part in enumerate(parts):
             part_title = part.get('part_title', f'部分{idx+1}')
-            print(f"\n  正在生成：{part_title}")
+            self.logger.info(f"\n  正在生成：{part_title}")
             is_last = (idx == len(parts) - 1)
             section_text = self.generate_section(
                 self.llm, part_title, prev_content, background, report_content, is_last
             )
             full_report.append(section_text)
-            print(f"  ✅ 已完成：{part_title}")
+            self.logger.info(f"  ✅ 已完成：{part_title}")
             prev_content = '\n'.join(full_report)
         
         # 保存最终报告
@@ -325,20 +366,20 @@ class IntegratedResearchReportGenerator:
         self.save_markdown(final_report, output_file)
         
         # 格式化和转换
-        print("\n🎨 格式化报告...")
+        self.logger.info("\n🎨 格式化报告...")
         self.format_markdown(output_file)
         
-        print("\n📄 转换为Word文档...")
+        self.logger.info("\n📄 转换为Word文档...")
         self.convert_to_docx(output_file)
         
-        print(f"\n✅ 第二阶段完成！深度研报已保存到: {output_file}")
+        self.logger.info(f"\n✅ 第二阶段完成！深度研报已保存到: {output_file}")
         return output_file
     
     def run_full_pipeline(self):
         """运行完整流程"""
-        print("\n" + "="*100)
-        print("🎯 启动整合的金融研报生成流程")
-        print("="*100)
+        self.logger.info("\n" + "="*100)
+        self.logger.info("🎯 启动整合的金融研报生成流程")
+        self.logger.info("="*100)
         
         # 第一阶段：数据采集与基础分析
         md_file = self.stage1_data_collection()
@@ -346,11 +387,11 @@ class IntegratedResearchReportGenerator:
         # 第二阶段：深度研报生成
         final_report = self.stage2_deep_report_generation(md_file)
         
-        print("\n" + "="*100)
-        print("🎉 完整流程执行完毕！")
-        print(f"📊 基础分析报告: {md_file}")
-        print(f"📋 深度研报: {final_report}")
-        print("="*100)
+        self.logger.info("\n" + "="*100)
+        self.logger.info("🎉 完整流程执行完毕！")
+        self.logger.info(f"📊 基础分析报告: {md_file}")
+        self.logger.info(f"📋 深度研报: {final_report}")
+        self.logger.info("="*100)
         
         return md_file, final_report
 
@@ -519,8 +560,8 @@ class IntegratedResearchReportGenerator:
             max_tokens=4096,
             temperature=0.3
         )
-        print("\n===== 生成的分段大纲如下 =====\n")
-        print(outline_list)
+        self.logger.info("\n===== 生成的分段大纲如下 =====\n")
+        self.logger.info(outline_list)
         try:
             if '```yaml' in outline_list:
                 yaml_block = outline_list.split('```yaml')[1].split('```')[0]
@@ -530,7 +571,7 @@ class IntegratedResearchReportGenerator:
             if isinstance(parts, dict):
                 parts = list(parts.values())
         except Exception as e:
-            print(f"[大纲yaml解析失败] {e}")
+            self.logger.error(f"[大纲yaml解析失败] {e}")
             parts = []
         return parts
     
@@ -581,7 +622,7 @@ class IntegratedResearchReportGenerator:
         section_text = llm.call(
             section_prompt,
             system_prompt="你是顶级金融分析师，专门生成完整可用的研报内容。输出必须是完整的研报正文，无需用户修改。严格禁止输出分隔符、建议性语言或虚构内容。只允许引用真实存在于【财务研报汇总内容】中的图片地址，严禁虚构、猜测、改编图片路径。如引用了不存在的图片，将被判为错误输出。",
-            max_tokens=16384,
+            max_tokens=8192,
             temperature=0.5
         )
         return section_text
@@ -590,7 +631,7 @@ class IntegratedResearchReportGenerator:
         """保存markdown文件"""
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
-        print(f"\n📁 深度财务研报分析已保存到: {output_file}")
+        self.logger.info(f"\n📁 深度财务研报分析已保存到: {output_file}")
     
     def format_markdown(self, output_file):
         """格式化markdown文件"""
@@ -598,9 +639,9 @@ class IntegratedResearchReportGenerator:
             import subprocess
             format_cmd = ["mdformat", output_file]
             subprocess.run(format_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            print(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
+            self.logger.info(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
         except Exception as e:
-            print(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
+            self.logger.error(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
     
     def convert_to_docx(self, output_file, docx_output=None):
         """转换为Word文档"""
@@ -621,12 +662,12 @@ class IntegratedResearchReportGenerator:
             env = os.environ.copy()
             env['PYTHONIOENCODING'] = 'utf-8'
             subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True, encoding='utf-8', env=env)
-            print(f"\n📄 Word版报告已生成: {docx_output}")
+            self.logger.info(f"\n📄 Word版报告已生成: {docx_output}")
         except subprocess.CalledProcessError as e:
-            print(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
-            print("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
+            self.logger.error(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
+            self.logger.warning("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
         except Exception as e:
-            print(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
+            self.logger.error(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
     
     # ========== 图片处理相关方法 ==========
     
@@ -649,7 +690,7 @@ class IntegratedResearchReportGenerator:
                     f.write(chunk)
             return True
         except Exception as e:
-            print(f"[下载失败] {url}: {e}")
+            self.logger.error(f"[下载失败] {url}: {e}")
             return False
     
     def copy_image(self, src, dst):
@@ -658,7 +699,7 @@ class IntegratedResearchReportGenerator:
             shutil.copy2(src, dst)
             return True
         except Exception as e:
-            print(f"[复制失败] {src}: {e}")
+            self.logger.error(f"[复制失败] {src}: {e}")
             return False
     
     def extract_images_from_markdown(self, md_path, images_dir, new_md_path):
@@ -702,7 +743,7 @@ class IntegratedResearchReportGenerator:
                 if not os.path.isabs(img_path):
                     abs_img_path = os.path.join(os.path.dirname(md_path), img_path)
                 if not os.path.exists(abs_img_path):
-                    print(f"[警告] 本地图片不存在: {abs_img_path}")
+                    self.logger.warning(f"[警告] 本地图片不存在: {abs_img_path}")
                     img_exists = False
                 else:
                     self.copy_image(abs_img_path, new_img_path)
@@ -722,7 +763,12 @@ class IntegratedResearchReportGenerator:
         new_content = pattern.sub(replace_func, content)
         with open(new_md_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
-        print(f"图片处理完成！新文件: {new_md_path}")
+        self.logger.info(f"图片处理完成！新文件: {new_md_path}")
+
+        # 记录未能插入markdown的图片信息
+        if not_exist_set:
+            for img_path in not_exist_set:
+                self.logger.error(f"图片未能插入markdown，原因：下载/复制失败或文件不存在。原始路径: {img_path}")
 
 
 def main():
@@ -731,11 +777,21 @@ def main():
     
     # 添加命令行参数支持
     parser = argparse.ArgumentParser(description='整合的金融研报生成器')
-    parser.add_argument('--search-engine', choices=['ddg', 'sogou'], default='sogou',
-                       help='搜索引擎选择: ddg (DuckDuckGo) 或 sogou (搜狗), 默认: ddg')
+    parser.add_argument('--search-engine', choices=['ddg', 'sogou', 'all'], default='all',
+                       help='搜索引擎选择: ddg (DuckDuckGo), sogou (搜狗), all (全部), 默认: all')
     parser.add_argument('--company', default='商汤科技', help='目标公司名称')
     parser.add_argument('--code', default='00020', help='股票代码')
     parser.add_argument('--market', default='HK', help='市场代码')
+    parser.add_argument('--stage', choices=['1', '2', 'both'], default='both',
+                       help='执行阶段: 1 (仅数据采集), 2 (仅深度研报), both (完整流程), 默认: both')
+    parser.add_argument('--input-file', default=None,
+                       help='第二阶段输入文件 (当stage=2时使用)')
+    parser.add_argument('--output-prefix', default='深度财务研报分析',
+                       help='输出文件前缀')
+    parser.add_argument('--max-search-results', type=int, default=10,
+                       help='每次搜索的最大结果数')
+    parser.add_argument('--force-refresh', action='store_true',
+                       help='强制刷新搜索缓存')
     
     args = parser.parse_args()
     
@@ -744,17 +800,54 @@ def main():
         target_company=args.company,
         target_company_code=args.code, 
         target_company_market=args.market,
-        # search_engine=args.search_engine
+        search_engine=args.search_engine
     )
     
-    # 运行完整流程
-    basic_report, deep_report = generator.run_full_pipeline()
-    
-    print("\n" + "="*100)
-    print("🎯 程序执行完毕！生成的文件：")
-    print(f"📊 基础分析报告: {basic_report}")
-    print(f"📋 深度研报: {deep_report}")
-    print("="*100)
+    # 根据阶段执行不同的流程
+    if args.stage == '1':
+        # 仅执行第一阶段
+        logger = logging.getLogger('FinancialResearch')
+        logger.info("🚀 仅执行第一阶段：数据采集与基础分析")
+        basic_report = generator.stage1_data_collection()
+        logger.info(f"✅ 第一阶段完成！基础分析报告: {basic_report}")
+        return basic_report, None
+        
+    elif args.stage == '2':
+        # 仅执行第二阶段
+        logger = logging.getLogger('FinancialResearch')
+        logger.info("🚀 仅执行第二阶段：深度研报生成")
+        
+        if args.input_file:
+            md_file = args.input_file
+        else:
+            # 自动查找最新的财务研报汇总文件
+            pattern = "财务研报汇总_*.md"
+            files = glob.glob(pattern)
+            if not files:
+                logger.error("未找到财务研报汇总文件，请先运行第一阶段或指定 --input-file 参数")
+                return None, None
+            # 按修改时间排序，取最新的
+            files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            md_file = files[0]
+            logger.info(f"自动选择最新的输入文件: {md_file}")
+        
+        deep_report = generator.stage2_deep_report_generation(md_file)
+        logger.info(f"✅ 第二阶段完成！深度研报: {deep_report}")
+        return None, deep_report
+        
+    else:
+        # 执行完整流程
+        basic_report, deep_report = generator.run_full_pipeline()
+        
+        # 使用logger记录最终结果
+        logger = logging.getLogger('FinancialResearch')
+        logger.info("\n" + "="*100)
+        logger.info("🎯 程序执行完毕！生成的文件：")
+        logger.info(f"📊 基础分析报告: {basic_report}")
+        logger.info(f"📋 深度研报: {deep_report}")
+        logger.info("="*100)
+        
+        return basic_report, deep_report
 
 
 if __name__ == "__main__":

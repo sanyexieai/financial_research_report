@@ -12,6 +12,9 @@ import re
 import shutil
 import requests
 from urllib.parse import urlparse
+import argparse
+import logging
+import glob
 
 def load_report_content(md_path):
     with open(md_path, "r", encoding="utf-8") as f:
@@ -62,8 +65,9 @@ def generate_outline(llm, background, report_content):
         max_tokens=4096,
         temperature=0.3
     )
-    print("\n===== 生成的分段大纲如下 =====\n")
-    print(outline_list)
+    logger = logging.getLogger('InDepthResearch')
+    logger.info("\n===== 生成的分段大纲如下 =====\n")
+    logger.info(outline_list)
     try:
         if '```yaml' in outline_list:
             yaml_block = outline_list.split('```yaml')[1].split('```')[0]
@@ -73,7 +77,7 @@ def generate_outline(llm, background, report_content):
         if isinstance(parts, dict):
             parts = list(parts.values())
     except Exception as e:
-        print(f"[大纲yaml解析失败] {e}")
+        logger.error(f"[大纲yaml解析失败] {e}")
         parts = []
     return parts
 
@@ -115,7 +119,7 @@ def generate_section(llm, part_title, prev_content, background, report_content, 
 """
     if is_last:
         section_prompt += """
-请在本节最后以“引用文献”格式，列出所有正文中用到的参考资料，格式如下：
+请在本节最后以"引用文献"格式，列出所有正文中用到的参考资料，格式如下：
 [1] 东方财富-港股-财务报表: https://emweb.securities.eastmoney.com/PC_HKF10/FinancialAnalysis/index
 [2] 同花顺-主营介绍: https://basic.10jqka.com.cn/new/000066/operate.html
 [3] 同花顺-股东信息: https://basic.10jqka.com.cn/HK0020/holder.html
@@ -123,7 +127,7 @@ def generate_section(llm, part_title, prev_content, background, report_content, 
     section_text = llm.call(
         section_prompt,
         system_prompt="你是顶级金融分析师，专门生成完整可用的研报内容。输出必须是完整的研报正文，无需用户修改。严格禁止输出分隔符、建议性语言或虚构内容。只允许引用真实存在于【财务研报汇总内容】中的图片地址，严禁虚构、猜测、改编图片路径。如引用了不存在的图片，将被判为错误输出。",
-        max_tokens=16384,
+        max_tokens=8192,
         temperature=0.5
     )
     return section_text
@@ -131,16 +135,19 @@ def generate_section(llm, part_title, prev_content, background, report_content, 
 def save_markdown(content, output_file):
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(content)
-    print(f"\n📁 深度财务研报分析已保存到: {output_file}")
+    logger = logging.getLogger('InDepthResearch')
+    logger.info(f"\n📁 深度财务研报分析已保存到: {output_file}")
 
 def format_markdown(output_file):
     try:
         import subprocess
         format_cmd = ["mdformat", output_file]
         subprocess.run(format_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-        print(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
+        logger = logging.getLogger('InDepthResearch')
+        logger.info(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
     except Exception as e:
-        print(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
+        logger = logging.getLogger('InDepthResearch')
+        logger.error(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
 
 def convert_to_docx(output_file, docx_output="Company_Research_Report.docx"):
     try:
@@ -158,12 +165,15 @@ def convert_to_docx(output_file, docx_output="Company_Research_Report.docx"):
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True, encoding='utf-8', env=env)
-        print(f"\n📄 Word版报告已生成: {docx_output}")
+        logger = logging.getLogger('InDepthResearch')
+        logger.info(f"\n📄 Word版报告已生成: {docx_output}")
     except subprocess.CalledProcessError as e:
-        print(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
-        print("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
+        logger = logging.getLogger('InDepthResearch')
+        logger.error(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
+        logger.warning("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
     except Exception as e:
-        print(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
+        logger = logging.getLogger('InDepthResearch')
+        logger.error(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
 
 # 图片路径预处理：将 md 文件中的图片全部本地化到 images 目录，并替换为 ./images/xxx.png 路径
 def ensure_dir(path):
@@ -182,7 +192,8 @@ def download_image(url, save_path):
                 f.write(chunk)
         return True
     except Exception as e:
-        print(f"[下载失败] {url}: {e}")
+        logger = logging.getLogger('InDepthResearch')
+        logger.error(f"[下载失败] {url}: {e}")
         return False
 
 def copy_image(src, dst):
@@ -190,7 +201,8 @@ def copy_image(src, dst):
         shutil.copy2(src, dst)
         return True
     except Exception as e:
-        print(f"[复制失败] {src}: {e}")
+        logger = logging.getLogger('InDepthResearch')
+        logger.error(f"[复制失败] {src}: {e}")
         return False
 
 def extract_images_from_markdown(md_path, images_dir, new_md_path):
@@ -204,6 +216,7 @@ def extract_images_from_markdown(md_path, images_dir, new_md_path):
     used_names = set()
     replace_map = {}
     not_exist_set = set()
+    logger = logging.getLogger('InDepthResearch')
 
     for img_path in matches:
         img_path = img_path.strip()
@@ -233,7 +246,7 @@ def extract_images_from_markdown(md_path, images_dir, new_md_path):
             if not os.path.isabs(img_path):
                 abs_img_path = os.path.join(os.path.dirname(md_path), img_path)
             if not os.path.exists(abs_img_path):
-                print(f"[警告] 本地图片不存在: {abs_img_path}")
+                logger.warning(f"[警告] 本地图片不存在: {abs_img_path}")
                 img_exists = False
             else:
                 copy_image(abs_img_path, new_img_path)
@@ -253,39 +266,120 @@ def extract_images_from_markdown(md_path, images_dir, new_md_path):
     new_content = pattern.sub(replace_func, content)
     with open(new_md_path, 'w', encoding='utf-8') as f:
         f.write(new_content)
-    print(f"图片处理完成！新文件: {new_md_path}")
+    logger.info(f"图片处理完成！新文件: {new_md_path}")
 
 def main():
+    """主函数"""
+    # 配置日志记录
+    def setup_logging():
+        """配置日志记录"""
+        os.makedirs("logs", exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = f"logs/in_depth_research_{timestamp}.log"
+        
+        logger = logging.getLogger('InDepthResearch')
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
+        
+        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+        logger.info(f"📝 深度研报生成日志已启动: {log_filename}")
+        return logger
+    
+    logger = setup_logging()
+    
+    # 添加命令行参数支持
+    parser = argparse.ArgumentParser(description='深度财务研报生成器')
+    parser.add_argument('--input-file', default=None, 
+                       help='输入的财务研报汇总文件路径 (默认: 自动查找最新的财务研报汇总文件)')
+    parser.add_argument('--company', default='商汤科技', help='目标公司名称')
+    parser.add_argument('--output-prefix', default='深度财务研报分析', 
+                       help='输出文件前缀')
+    parser.add_argument('--format-only', action='store_true', 
+                       help='仅格式化现有文件，不重新生成内容')
+    
+    args = parser.parse_args()
+    
+    # 查找输入文件
+    if args.input_file:
+        raw_md_path = args.input_file
+        if not os.path.exists(raw_md_path):
+            logger.error(f"指定的输入文件不存在: {raw_md_path}")
+            return
+    else:
+        # 自动查找最新的财务研报汇总文件
+        pattern = "财务研报汇总_*.md"
+        files = glob.glob(pattern)
+        if not files:
+            logger.error("未找到财务研报汇总文件，请先运行数据采集阶段或指定 --input-file 参数")
+            return
+        # 按修改时间排序，取最新的
+        files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+        raw_md_path = files[0]
+        logger.info(f"自动选择最新的输入文件: {raw_md_path}")
+    
+    # 检查是否仅格式化
+    if args.format_only:
+        logger.info("仅格式化模式，跳过内容生成...")
+        if os.path.exists(raw_md_path):
+            format_markdown(raw_md_path)
+            convert_to_docx(raw_md_path)
+        else:
+            logger.error(f"文件不存在: {raw_md_path}")
+        return
+    
     # ====== 图片路径预处理，自动生成本地 images 路径的 markdown 文件 ======
-    raw_md_path = "财务研报汇总_20250608_074539.md"  # 原始输入 markdown
-    new_md_path = "财务研报汇总_20250608_074539_images.md"  # 处理后输出 markdown
+    logger.info("🖼️ 开始图片路径预处理...")
+    new_md_path = raw_md_path.replace('.md', '_images.md')
     images_dir = os.path.join(os.path.dirname(raw_md_path), 'images')
     extract_images_from_markdown(raw_md_path, images_dir, new_md_path)
 
     # 后续流程用 new_md_path
+    logger.info("📖 加载报告内容...")
     report_content = load_report_content(new_md_path)
     background = get_background()
     llm = get_llm()
+    
+    logger.info("📋 生成报告大纲...")
     parts = generate_outline(llm, background, report_content)
-    full_report = ['# 商汤科技公司研报\n']
+    
+    logger.info("✍️ 开始分段生成深度研报...")
+    full_report = [f'# {args.company}公司研报\n']
     prev_content = ''
+    
     for idx, part in enumerate(parts):
         part_title = part.get('part_title', f'部分{idx+1}')
-        print(f"\n===== 正在生成：{part_title} =====\n")
+        logger.info(f"\n  正在生成：{part_title}")
         is_last = (idx == len(parts) - 1)
         section_text = generate_section(
             llm, part_title, prev_content, background, report_content, is_last
         )
         full_report.append(section_text)
-        print(f"\n===== 已生成：{part_title}（预览前2000字符） =====\n")
-        print(section_text[:2000])
-        print("\n===== 本部分内容结束 =====\n")
+        logger.info(f"  ✅ 已完成：{part_title}")
         prev_content = '\n'.join(full_report)
+    
     final_report = '\n\n'.join(full_report)
-    output_file = f"深度财务研报分析_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    output_file = f"{args.output_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     save_markdown(final_report, output_file)
+    
+    logger.info("🎨 格式化报告...")
     format_markdown(output_file)
+    
+    logger.info("📄 转换为Word文档...")
     convert_to_docx(output_file)
+    
+    logger.info(f"\n✅ 深度研报生成完成！")
+    logger.info(f"📁 输出文件: {output_file}")
+    logger.info(f"📄 Word文档: {output_file.replace('.md', '.docx')}")
 
 if __name__ == "__main__":
     main()
