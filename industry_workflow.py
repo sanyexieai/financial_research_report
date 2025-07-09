@@ -50,18 +50,16 @@ class IndustryResearchFlow(Node):  # 研报生成的决策节点
         generated_sections = shared.get("generated_sections", [])
         context_str = yaml.dump(context, allow_unicode=True)
         industry = shared["industry"]  # 行业名称
-        
         # 记录已生成的章节名称
         generated_section_names = [section.get('name', '') for section in generated_sections]
-        
-        return industry, context_str, generated_section_names
+        return industry, context_str, generated_section_names, shared
 
     def exec(self, inputs):
-        industry, context, generated_section_names = inputs
+        industry, context, generated_section_names, shared = inputs
         logger.info(f"\n正在分析 {industry} 行业的研究进度...")
         logger.info(f"已生成的章节: {generated_section_names}")
-        
-        prompt = f"""
+        while True:
+            prompt = f"""
 针对 {industry} 行业研究，分析已有信息：{context}
 
 已生成的章节：{generated_section_names}
@@ -99,34 +97,41 @@ section: # 如果是generate，指定要生成的单个章节
 - section字段必须是一个单个章节的字典，包含name和focus字段
 - 不要返回章节列表，只返回一个要生成的章节
 """
-        resp = call_llm(prompt)
-        try:
-            yaml_str = resp.split("```yaml")[1].split("```", 1)[0].strip()
-            result = yaml.safe_load(yaml_str)
-        except Exception as e:
-            logger.error(f"解析YAML失败: {e}")
-            logger.error(f"原始响应: {resp}")
-            # 默认完成
-            result = {"action": "complete", "reason": "解析失败，默认完成"}
-        
-        # 打印决策结果
-        logger.info(f"决策结果: {result['action']}")
-        logger.info(f"决策原因: {result['reason']}")
-        if result['action'] == 'search':
-            search_terms = result.get('search_terms', [])
-            if isinstance(search_terms, list):
-                logger.info(f"需要搜索的关键词: {search_terms}")
-            else:
-                logger.warning(f"搜索关键词格式错误: {search_terms}")
-        elif result['action'] == 'generate':
-            section = result.get('section', {})
-            if isinstance(section, dict) and 'name' in section:
-                logger.info(f"即将生成章节: {section['name']}")
-            else:
-                logger.warning(f"章节信息格式错误: {section}")
-        elif result['action'] == 'complete':
-            logger.info("准备完成研报生成")
-        
+            resp = call_llm(prompt)
+            try:
+                yaml_str = resp.split("```yaml")[1].split("```", 1)[0].strip()
+                result = yaml.safe_load(yaml_str)
+            except Exception as e:
+                logger.error(f"解析YAML失败: {e}")
+                logger.error(f"原始响应: {resp}")
+                # 默认完成
+                result = {"action": "complete", "reason": "解析失败，默认完成"}
+            # 打印决策结果
+            logger.info(f"决策结果: {result['action']}")
+            logger.info(f"决策原因: {result['reason']}")
+            if result['action'] == 'search':
+                search_terms = result.get('search_terms', [])
+                if isinstance(search_terms, list):
+                    logger.info(f"需要搜索的关键词: {search_terms}")
+                else:
+                    logger.warning(f"搜索关键词格式错误: {search_terms}")
+                break
+            elif result['action'] == 'generate':
+                section = result.get('section', {})
+                if isinstance(section, dict) and 'name' in section:
+                    if section['name'] in generated_section_names:
+                        logger.warning(f"章节 {section['name']} 已生成，跳过，重新决策...")
+                        # 刷新 generated_section_names，防止死循环
+                        generated_sections = shared.get("generated_sections", [])
+                        generated_section_names = [s.get('name', '') for s in generated_sections]
+                        continue
+                    logger.info(f"即将生成章节: {section['name']}")
+                else:
+                    logger.warning(f"章节信息格式错误: {section}")
+                break
+            elif result['action'] == 'complete':
+                logger.info("准备完成研报生成")
+                break
         return result
 
     def post(self, shared, prep_res, exec_res):
@@ -198,7 +203,6 @@ class GenerateSection(Node):  # 章节生成节点
 
     def exec(self, inputs):
         industry, section, context = inputs
-        
         # 安全检查section格式
         if not isinstance(section, dict) or 'name' not in section:
             logger.error(f"章节信息格式错误: {section}")
@@ -206,11 +210,9 @@ class GenerateSection(Node):  # 章节生成节点
                 "name": "错误章节",
                 "content": f"章节信息格式错误: {section}"
             }
-        
         logger.info(f"\n开始生成 {section['name']} 章节...")
         context_str = yaml.dump(context, allow_unicode=True)
         focus = section.get('focus', '综合分析')
-        
         prompt = f"""
 行业：{industry}
 章节：{section['name']}
@@ -227,16 +229,18 @@ class GenerateSection(Node):  # 章节生成节点
         content = call_llm(prompt)
         logger.info(f"章节 {section['name']} 生成完成!")
         logger.info(f"内容长度: {len(content)} 字符")
-        # 打印前100个字符预览
         logger.info(f"内容预览: {content[:100]}...")
         return {
             "name": section["name"],
             "content": content
         }
-        
 
     def post(self, shared, prep_res, exec_res):
         sections = shared.get("generated_sections", [])
+        generated_names = [s.get('name', '') for s in sections]
+        if exec_res['name'] in generated_names:
+            logger.warning(f"章节 {exec_res['name']} 已生成，跳过")
+            return "continue"
         sections.append(exec_res)
         shared["generated_sections"] = sections
         logger.info(f"\n章节 {exec_res['name']} 已添加到生成列表")

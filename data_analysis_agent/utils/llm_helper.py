@@ -5,6 +5,8 @@ LLM调用辅助模块
 
 import asyncio
 import yaml
+import os
+import datetime
 from ..config.llm_config import LLMConfig
 from .fallback_openai_client import AsyncFallbackOpenAIClient
 
@@ -18,7 +20,21 @@ class LLMHelper:
             primary_base_url=config.base_url,
             primary_model_name=config.model
         )
+        # 日志写到项目根目录
+        self.llm_log_path = os.path.join(os.getcwd(), 'llm_calls.log')
     
+    def log_llm_call(self, prompt, system_prompt, response):
+        try:
+            print(f"LLM日志写入路径: {self.llm_log_path}")
+            with open(self.llm_log_path, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*40}\n[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]\n")
+                if system_prompt:
+                    f.write(f"[System Prompt]:\n{system_prompt}\n")
+                f.write(f"[User Prompt]:\n{prompt}\n")
+                f.write(f"[LLM Response]:\n{response}\n")
+        except Exception as e:
+            print(f"写入llm_calls.log失败: {e}")
+
     async def async_call(self, prompt: str, system_prompt: str = None, max_tokens: int = None, temperature: float = None) -> str:
         """异步调用LLM"""
         messages = []
@@ -42,7 +58,9 @@ class LLMHelper:
                 messages=messages,
                 **kwargs
             )
-            return response.choices[0].message.content
+            result = response.choices[0].message.content
+            self.log_llm_call(prompt, system_prompt, result)
+            return result
         except Exception as e:
             print(f"LLM调用失败: {e}")
             return ""
@@ -56,7 +74,7 @@ class LLMHelper:
                 try:
                     import nest_asyncio
                     nest_asyncio.apply()
-                    return asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
+                    result = asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
                 except ImportError:
                     # 如果没有nest_asyncio，使用create_task
                     task = asyncio.create_task(self.async_call(prompt, system_prompt, max_tokens, temperature))
@@ -83,13 +101,16 @@ class LLMHelper:
                     
                     if exception:
                         raise exception
-                    return result
             else:
                 # 如果事件循环未运行，直接使用asyncio.run
-                return asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
+                result = asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
+            self.log_llm_call(prompt, system_prompt, result)
+            return result
         except RuntimeError:
             # 如果没有事件循环，创建新的
-            return asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
+            result = asyncio.run(self.async_call(prompt, system_prompt, max_tokens, temperature))
+            self.log_llm_call(prompt, system_prompt, result)
+            return result
     
     def parse_yaml_response(self, response: str) -> dict:
         """解析YAML格式的响应"""

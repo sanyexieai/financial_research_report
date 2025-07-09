@@ -16,6 +16,8 @@ import argparse
 import logging
 import glob
 
+from utils.markdown_tools import convert_to_docx, format_markdown
+
 def load_report_content(md_path):
     with open(md_path, "r", encoding="utf-8") as f:
         return f.read()
@@ -81,9 +83,13 @@ def generate_outline(llm, background, report_content):
         parts = []
     return parts
 
-def generate_section(llm, part_title, prev_content, background, report_content, is_last):
+def generate_section(llm, part_title, prev_content, background, report_content, is_last, generated_names=None):
+    if generated_names is None:
+        generated_names = []
     section_prompt = f"""
 你是一位顶级金融分析师和研报撰写专家。请基于以下内容，直接输出\"{part_title}\"这一部分的完整研报内容。
+
+【已生成章节】：{list(generated_names)}
 
 **重要要求：**
 1. 直接输出完整可用的研报内容，以\"## {part_title}\"开头
@@ -137,43 +143,6 @@ def save_markdown(content, output_file):
         f.write(content)
     logger = logging.getLogger('InDepthResearch')
     logger.info(f"\n📁 深度财务研报分析已保存到: {output_file}")
-
-def format_markdown(output_file):
-    try:
-        import subprocess
-        format_cmd = ["mdformat", output_file]
-        subprocess.run(format_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-        logger = logging.getLogger('InDepthResearch')
-        logger.info(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
-    except Exception as e:
-        logger = logging.getLogger('InDepthResearch')
-        logger.error(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
-
-def convert_to_docx(output_file, docx_output="Company_Research_Report.docx"):
-    try:
-        import subprocess
-        import os
-        pandoc_cmd = [
-            "pandoc",
-            output_file,
-            "-o",
-            docx_output,
-            "--standalone",
-            "--resource-path=.",
-            "--extract-media=."
-        ]
-        env = os.environ.copy()
-        env['PYTHONIOENCODING'] = 'utf-8'
-        subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True, encoding='utf-8', env=env)
-        logger = logging.getLogger('InDepthResearch')
-        logger.info(f"\n📄 Word版报告已生成: {docx_output}")
-    except subprocess.CalledProcessError as e:
-        logger = logging.getLogger('InDepthResearch')
-        logger.error(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
-        logger.warning("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
-    except Exception as e:
-        logger = logging.getLogger('InDepthResearch')
-        logger.error(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
 
 # 图片路径预处理：将 md 文件中的图片全部本地化到 images 目录，并替换为 ./images/xxx.png 路径
 def ensure_dir(path):
@@ -332,7 +301,7 @@ def main():
         logger.info("仅格式化模式，跳过内容生成...")
         if os.path.exists(raw_md_path):
             format_markdown(raw_md_path)
-            convert_to_docx(raw_md_path)
+            convert_to_docx(raw_md_path,"Company_Research_Report.docx")
         else:
             logger.error(f"文件不存在: {raw_md_path}")
         return
@@ -355,17 +324,22 @@ def main():
     logger.info("✍️ 开始分段生成深度研报...")
     full_report = [f'# {args.company}公司研报\n']
     prev_content = ''
-    
+    generated_names = set()
     for idx, part in enumerate(parts):
         part_title = part.get('part_title', f'部分{idx+1}')
+        if part_title in generated_names:
+            logger.warning(f"章节 {part_title} 已生成，跳过")
+            logger.info(f"同步给LLM：已生成章节 {list(generated_names)}，跳过 {part_title}")
+            continue
         logger.info(f"\n  正在生成：{part_title}")
         is_last = (idx == len(parts) - 1)
         section_text = generate_section(
-            llm, part_title, prev_content, background, report_content, is_last
+            llm, part_title, prev_content, background, report_content, is_last, list(generated_names)
         )
         full_report.append(section_text)
         logger.info(f"  ✅ 已完成：{part_title}")
         prev_content = '\n'.join(full_report)
+        generated_names.add(part_title)
     
     final_report = '\n\n'.join(full_report)
     output_file = f"{args.output_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"

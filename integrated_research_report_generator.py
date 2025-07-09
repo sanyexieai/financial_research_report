@@ -27,6 +27,7 @@ from utils.get_financial_statements import get_all_financial_statements, save_fi
 from utils.identify_competitors import identify_competitors_with_ai
 from utils.get_stock_intro import get_stock_intro, save_stock_intro_to_txt
 from duckduckgo_search import DDGS
+from utils.markdown_tools import convert_to_docx, format_markdown
 from utils.search_engine import SearchEngine
 
 class IntegratedResearchReportGenerator:
@@ -348,17 +349,22 @@ class IntegratedResearchReportGenerator:
         self.logger.info("\n✍️ 开始分段生成深度研报...")
         full_report = ['# 商汤科技公司研报\n']
         prev_content = ''
-        
+        generated_names = set()
         for idx, part in enumerate(parts):
             part_title = part.get('part_title', f'部分{idx+1}')
+            if part_title in generated_names:
+                self.logger.warning(f"章节 {part_title} 已生成，跳过")
+                self.logger.info(f"同步给LLM：已生成章节 {list(generated_names)}，跳过 {part_title}")
+                continue
             self.logger.info(f"\n  正在生成：{part_title}")
             is_last = (idx == len(parts) - 1)
             section_text = self.generate_section(
-                self.llm, part_title, prev_content, background, report_content, is_last
+                self.llm, part_title, prev_content, background, report_content, is_last, list(generated_names)
             )
             full_report.append(section_text)
             self.logger.info(f"  ✅ 已完成：{part_title}")
             prev_content = '\n'.join(full_report)
+            generated_names.add(part_title)
         
         # 保存最终报告
         final_report = '\n\n'.join(full_report)
@@ -367,10 +373,10 @@ class IntegratedResearchReportGenerator:
         
         # 格式化和转换
         self.logger.info("\n🎨 格式化报告...")
-        self.format_markdown(output_file)
+        format_markdown(output_file)
         
         self.logger.info("\n📄 转换为Word文档...")
-        self.convert_to_docx(output_file)
+        convert_to_docx(output_file, docx_output=f"{output_file.replace('.md', '.docx')}")
         
         self.logger.info(f"\n✅ 第二阶段完成！深度研报已保存到: {output_file}")
         return output_file
@@ -575,10 +581,14 @@ class IntegratedResearchReportGenerator:
             parts = []
         return parts
     
-    def generate_section(self, llm, part_title, prev_content, background, report_content, is_last):
+    def generate_section(self, llm, part_title, prev_content, background, report_content, is_last, generated_names=None):
         """生成章节"""
+        if generated_names is None:
+            generated_names = []
         section_prompt = f"""
 你是一位顶级金融分析师和研报撰写专家。请基于以下内容，直接输出\"{part_title}\"这一部分的完整研报内容。
+
+【已生成章节】：{list(generated_names)}
 
 **重要要求：**
 1. 直接输出完整可用的研报内容，以\"## {part_title}\"开头
@@ -632,43 +642,7 @@ class IntegratedResearchReportGenerator:
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(content)
         self.logger.info(f"\n📁 深度财务研报分析已保存到: {output_file}")
-    
-    def format_markdown(self, output_file):
-        """格式化markdown文件"""
-        try:
-            import subprocess
-            format_cmd = ["mdformat", output_file]
-            subprocess.run(format_cmd, check=True, capture_output=True, text=True, encoding='utf-8')
-            self.logger.info(f"✅ 已用 mdformat 格式化 Markdown 文件: {output_file}")
-        except Exception as e:
-            self.logger.error(f"[提示] mdformat 格式化失败: {e}\n请确保已安装 mdformat (pip install mdformat)")
-    
-    def convert_to_docx(self, output_file, docx_output=None):
-        """转换为Word文档"""
-        if docx_output is None:
-            docx_output = output_file.replace('.md', '.docx')
-        try:
-            import subprocess
-            import os
-            pandoc_cmd = [
-                "pandoc",
-                output_file,
-                "-o",
-                docx_output,
-                "--standalone",
-                "--resource-path=.",
-                "--extract-media=."
-            ]
-            env = os.environ.copy()
-            env['PYTHONIOENCODING'] = 'utf-8'
-            subprocess.run(pandoc_cmd, check=True, capture_output=True, text=True, encoding='utf-8', env=env)
-            self.logger.info(f"\n📄 Word版报告已生成: {docx_output}")
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"[提示] pandoc转换失败。错误信息: {e.stderr}")
-            self.logger.warning("[建议] 检查图片路径是否正确，或使用 --extract-media 选项")
-        except Exception as e:
-            self.logger.error(f"[提示] 若需生成Word文档，请确保已安装pandoc。当前转换失败: {e}")
-    
+     
     # ========== 图片处理相关方法 ==========
     
     def ensure_dir(self, path):

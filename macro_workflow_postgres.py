@@ -10,9 +10,12 @@ from data_analysis_agent.config.llm_config import LLMConfig
 
 from utils.markdown_tools import format_markdown
 from utils.search_engine import SearchEngine
-from utils.rag_helper import RAGHelper
+from utils.rag_postgres import RAGPostgresHelper
+from config.database_config import db_config
 import logging
-logger = logging.getLogger('MacroResearch')
+
+logger = logging.getLogger('MacroResearchPostgres')
+
 # 加载环境变量
 load_dotenv()
 
@@ -29,8 +32,19 @@ llm = LLMHelper(
     )
 )
 
-# 初始化 RAG 助手（全局唯一）
-rag_helper = RAGHelper()
+# 初始化 PostgreSQL RAG 助手（全局唯一）
+try:
+    print('当前RAG配置:', db_config.get_rag_config())  # 调试用，打印当前RAG配置
+    rag_helper = RAGPostgresHelper(
+        db_config=db_config.get_postgres_config(),
+        rag_config=db_config.get_rag_config()
+    )
+    logger.info("PostgreSQL RAG助手初始化成功")
+except Exception as e:
+    logger.error(f"PostgreSQL RAG助手初始化失败: {e}")
+    logger.info("将使用内存RAG助手作为备选方案")
+    from utils.rag_helper import RAGHelper
+    rag_helper = RAGHelper()
 
 class IndustryResearchFlow(Node):  # 研报生成的决策节点
     def prep(self, shared):
@@ -50,9 +64,24 @@ class IndustryResearchFlow(Node):  # 研报生成的决策节点
         
         # 使用RAG获取相关背景信息
         rag_context = rag_helper.get_context_for_llm(
-            f"宏观经济研究 {industry} {', '.join(focus_areas)}", 
-            max_tokens=3000
+            f"宏观经济研究 {industry} {', '.join(focus_areas)}"
         )
+        
+        # 检查数据库中是否有足够的相关信息
+        # 先尝试从数据库获取相关上下文
+        relevant_context = rag_helper.get_context_for_llm(
+            f"宏观经济研究 {industry} {', '.join(focus_areas)}",
+            max_tokens=2000  # 限制token数量来评估信息丰富度
+        )
+        
+        # 基于相关上下文的长度来判断信息是否充足
+        context_length = len(relevant_context)
+        has_sufficient_data = context_length > 500  # 如果相关上下文超过500字符，认为有足够数据
+        
+        if not has_sufficient_data:
+            print(f"数据库相关信息不足（相关上下文长度: {context_length}字符），建议先搜索更多信息")
+        else:
+            print(f"数据库中有充足的相关信息（相关上下文长度: {context_length}字符），可以基于现有信息进行分析")
         
         while True:
             prompt = f"""
@@ -61,14 +90,25 @@ class IndustryResearchFlow(Node):  # 研报生成的决策节点
 【RAG增强背景信息】：
 {rag_context}
 
+【数据库信息评估】：
+- 相关信息充足度：{'充足' if has_sufficient_data else '不足'}
+- 相关上下文长度：{context_length}字符
+- 建议：{'可以基于现有信息进行分析' if has_sufficient_data else '需要搜索更多相关信息'}
+
 关注指标：{', '.join(focus_areas)}
 
-【已生成章节】：{generated_names}
+【已生成章节（严禁重复！）】：
+{generated_names}
+
+【极其重要的警告】：
+- 下方列表中的章节已生成，**严禁**在YAML输出中再次出现这些章节名！
+- 如果输出了已生成章节，系统会自动忽略并要求你重新决策，请务必只输出未生成章节。
+- YAML输出时，section.name字段必须是未生成章节，否则无效。
 
 请分析并判断下一步行动：
-1) 搜索更多信息
-2) 开始生成某个章节内容
-3) 完成研报生成
+1) search - 搜索更多信息（当缺少关键数据或背景信息时）
+2) generate - 开始生成某个章节内容（当有足够信息且章节未生成时）
+3) complete - 完成研报生成（当所有必要章节都已生成时）
 
 要特别关注：
 - 核心经济指标数据（GDP、CPI、利率、汇率）的最新数据和趋势
@@ -80,11 +120,11 @@ class IndustryResearchFlow(Node):  # 研报生成的决策节点
 请以 YAML 格式输出：
 ```yaml
 action: search/generate/complete  # search表示继续搜索，generate表示生成章节，complete表示完成
-reason: 做出此判断的原因
+reason: 做出此判断的原因，**并自查你输出的章节名是否在已生成章节列表中，确认没有重复**
 search_terms: # 如果是search，列出要搜索的关键词列表
   - 关键词1 
   - 关键词2
-section: # 如果是generate，指定要生成的章节名称
+section: # 如果是generate，指定要生成的章节名称（必须是未生成的章节，否则无效）
   name: 章节名称 # 如：宏观经济概况/政策解读/风险分析等
   focus: 重点关注内容 # 具体要分析的要点
 ```"""
@@ -166,7 +206,7 @@ class SearchInfo(Node):  # 信息搜索节点
         context_list.extend(exec_res)
         shared["context"] = context_list
         
-        # 将搜索结果添加到RAG知识库
+        # 将搜索结果添加到PostgreSQL RAG知识库
         total_added = 0
         for search_item in exec_res:
             search_term = search_item.get("term", "")
@@ -176,7 +216,12 @@ class SearchInfo(Node):  # 信息搜索节点
                 total_added += added_count
         
         print(f"\n信息搜索完成，返回决策节点...")
-        print(f"RAG知识库新增 {total_added} 个文档块")
+        print(f"PostgreSQL RAG知识库新增 {total_added} 个文档块")
+        
+        # 显示知识库统计
+        stats = rag_helper.get_statistics()
+        print(f"知识库统计: {stats['total_documents']} 个文档, {stats['total_chunks']} 个块")
+        
         return "search_done"
 
 class GenerateSection(Node):  # 章节生成节点
@@ -195,8 +240,7 @@ class GenerateSection(Node):  # 章节生成节点
         
         # 使用RAG获取相关背景信息
         rag_context = rag_helper.get_context_for_llm(
-            f"{section['name']} {section['focus']} {industry} {', '.join(focus_areas)}", 
-            max_tokens=4000
+            f"{section['name']} {section['focus']} {industry} {', '.join(focus_areas)}"
         )
         
         prompt = f"""
@@ -280,7 +324,13 @@ class CompleteReport(Node):  # 研报完成节点
 
     def post(self, shared, prep_res, exec_res):
         print(f"\n=== 研报生成完成！===")
-        print(f"研报已保存到 '研报2.md' 文件中")
+        print(f"研报已保存到 '研报_postgres.md' 文件中")
+        
+        # 显示最终的知识库统计
+        stats = rag_helper.get_statistics()
+        print(f"最终知识库统计: {stats['total_documents']} 个文档, {stats['total_chunks']} 个块")
+        print(f"最新更新时间: {stats.get('last_updated', '未知')}")
+        
         shared["report"] = exec_res
         return None
 
@@ -295,6 +345,11 @@ def search_web(term: str):
 示例用法
 """
 if __name__ == "__main__":
+    # 显示配置信息
+    print("=== PostgreSQL RAG配置 ===")
+    db_config.print_config()
+    print()
+    
     # 构建工作流
     research = IndustryResearchFlow()
     search = SearchInfo()
@@ -307,7 +362,8 @@ if __name__ == "__main__":
     research - "complete" >> complete
     search - "search_done" >> research
     generate - "continue" >> research
-      # 运行工作流
+    
+    # 运行工作流
     flow = Flow(start=research)
     shared_state = {
         "industry": "生成式AI基建与算力投资趋势（2023-2026）",
@@ -316,11 +372,11 @@ if __name__ == "__main__":
     }
     result = flow.run(shared_state)
     
-    output_filename = "研报2.md"
+    output_filename = "研报_postgres.md"
     # 保存结果
     if result:
         with open(output_filename, "w", encoding="utf-8") as f:
             f.write(result)
 
-    format_markdown(output_filename,"Macro_Research_Report.docx")
-    logger.info(f"✅ 研报已转换为docx格式")
+    format_markdown(output_filename, "Macro_Research_Report_Postgres.docx")
+    logger.info(f"研报已转换为docx格式") 
