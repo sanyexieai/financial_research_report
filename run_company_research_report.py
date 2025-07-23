@@ -501,10 +501,10 @@ class ReportGenerationPipeline:
         """获取完整报告"""
         try:
 
-            report_text_list = self.generate_report_content_1(report_info, True)
+            report_text_list = self.generate_report_content_1(report_info, False)
             self.report_info.report_text_list = report_text_list
 
-            abstract = self.get_abstract(report_info,True)
+            abstract = self.get_abstract(report_info,False)
 
             # 构建完整报告
             full_report_parts = [
@@ -544,7 +544,7 @@ class ReportGenerationPipeline:
             self.report_info = ReportInfo(self.target_company, rag_context, rag_company)
             self.report_info.report_title = f"{self.report_info.target_company}研报"
             # 生成大纲
-            outline = self.generate_outline(use_template=True)
+            outline = self.generate_outline(use_template=False)
             if not outline:
                 raise ValueError("大纲生成失败")
 
