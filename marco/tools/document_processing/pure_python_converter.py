@@ -32,8 +32,7 @@ def convert_md_to_docx_pure_python(input_file: str, output_file: Optional[str] =
             'tables', 
             'fenced_code', 
             'codehilite',
-            'nl2br',
-            'toc'  # 添加目录支持
+            'nl2br'
         ])
         
         # 解析 HTML
@@ -45,11 +44,8 @@ def convert_md_to_docx_pure_python(input_file: str, output_file: Optional[str] =
         # 设置文档样式（支持中文字体）
         setup_chinese_document_styles(doc)
         
-        # 提取标题信息用于后续目录生成
-        headings = extract_headings(soup)
-        
-        # 按顺序处理所有元素，在摘要后插入目录
-        process_elements_with_toc_insertion(doc, soup, headings)
+        # 按顺序处理所有元素，跳过目录部分
+        process_elements_in_order_skip_toc(doc, soup)
         
         # 保存文档
         doc.save(output_file)
@@ -62,117 +58,6 @@ def convert_md_to_docx_pure_python(input_file: str, output_file: Optional[str] =
         traceback.print_exc()
         return None
 
-def process_elements_with_toc_insertion(doc, soup, headings):
-    """
-    按顺序处理HTML元素，在摘要后插入目录
-    """
-    body = soup.find('body') if soup.find('body') else soup
-    toc_inserted = False
-    skip_markdown_toc = False
-    
-    for element in body.children:
-        if hasattr(element, 'name') and element.name:
-            # 跳过 Markdown 中的目录部分
-            if element.name == 'h2' and '目录' in element.get_text():
-                skip_markdown_toc = True
-                continue
-            
-            if skip_markdown_toc and element.name in ['ul', 'ol', 'li']:
-                continue
-                
-            if skip_markdown_toc and element.name and element.name.startswith('h'):
-                skip_markdown_toc = False
-            
-            # 处理当前元素
-            if not skip_markdown_toc:
-                process_single_element(doc, element)
-                
-                # 检查是否刚处理完摘要，如果是则插入目录
-                if not toc_inserted and element.name and element.name.startswith('h'):
-                    text = clean_text_with_references(element.get_text())
-                    if '摘要' in text or 'Abstract' in text:
-                        # 在摘要后插入目录
-                        if headings:
-                            doc.add_page_break()  # 摘要后分页
-                            add_improved_table_of_contents(doc, headings)
-                            doc.add_page_break()  # 目录后分页
-                            toc_inserted = True
-
-def add_improved_table_of_contents(doc, headings: List[Dict]):
-    """
-    添加改进的目录到文档
-    """
-    # 添加目录标题
-    toc_heading = doc.add_heading('目录', level=1)
-    toc_heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-    for run in toc_heading.runs:
-        run.font.name = '黑体'
-        run.font.size = Pt(16)
-        run.font.bold = True
-        set_run_chinese_font(run, '黑体')
-    
-    # 添加空行
-    doc.add_paragraph()
-    
-    # 添加目录项
-    for i, heading in enumerate(headings):
-        level = heading['level']
-        text = heading['text']
-        
-        # 跳过目录标题本身
-        if '目录' in text:
-            continue
-            
-        # 根据标题级别设置缩进和样式
-        para = doc.add_paragraph()
-        
-        # 设置缩进
-        if level == 1:
-            para.paragraph_format.left_indent = Inches(0)
-            font_size = Pt(14)
-            is_bold = True
-        elif level == 2:
-            para.paragraph_format.left_indent = Inches(0.3)
-            font_size = Pt(12)
-            is_bold = False
-        else:
-            para.paragraph_format.left_indent = Inches(0.6)
-            font_size = Pt(11)
-            is_bold = False
-        
-        # 设置行间距
-        para.paragraph_format.space_after = Pt(6)
-        
-        # 添加标题文本
-        run = para.add_run(text)
-        run.font.name = '宋体'
-        run.font.size = font_size
-        run.font.bold = is_bold
-        set_run_chinese_font(run, '宋体')
-        
-        # 添加制表符和页码占位符
-        tab_run = para.add_run('\t')
-        
-        # 添加点线
-        dots_run = para.add_run('.' * 50)
-        dots_run.font.name = '宋体'
-        dots_run.font.size = Pt(10)
-        set_run_chinese_font(dots_run, '宋体')
-        
-        # 添加页码占位符
-        page_run = para.add_run(f'\t{i + 1}')
-        page_run.font.name = '宋体'
-        page_run.font.size = font_size
-        page_run.font.bold = is_bold
-        set_run_chinese_font(page_run, '宋体')
-        
-        # 设置制表位（右对齐页码）
-        tab_stops = para.paragraph_format.tab_stops
-        tab_stops.add_tab_stop(Inches(6.0))
-    
-    # 添加空行
-    doc.add_paragraph()
-
 def preprocess_markdown(content: str) -> str:
     """
     预处理 Markdown 内容，特别处理参考文献
@@ -180,61 +65,6 @@ def preprocess_markdown(content: str) -> str:
     # 保护参考文献格式，避免被markdown解析器破坏
     content = re.sub(r'\[(\d+)\]', r'【参考文献\1】', content)
     return content
-
-def extract_headings(soup) -> List[Dict]:
-    """
-    提取文档中的所有标题，用于生成目录
-    """
-    headings = []
-    heading_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
-    
-    for heading in heading_tags:
-        level = int(heading.name[1])
-        text = clean_text_with_references(heading.get_text())
-        if text.strip():
-            headings.append({
-                'level': level,
-                'text': text.strip(),
-                'id': f"heading_{len(headings)}"
-            })
-    
-    return headings
-
-def add_table_of_contents(doc, headings: List[Dict]):
-    """
-    添加目录到文档
-    """
-    # 添加目录标题
-    toc_heading = doc.add_heading('目录', level=1)
-    for run in toc_heading.runs:
-        run.font.name = '黑体'
-        set_run_chinese_font(run, '黑体')
-    
-    # 添加目录项
-    for heading in headings:
-        level = heading['level']
-        text = heading['text']
-        
-        # 根据标题级别设置缩进
-        indent_level = (level - 1) * 0.5  # 每级缩进0.5英寸
-        
-        para = doc.add_paragraph()
-        para.paragraph_format.left_indent = Inches(indent_level)
-        
-        # 添加标题文本
-        run = para.add_run(text)
-        run.font.name = '宋体'
-        run.font.size = Pt(12 - level)  # 根据级别调整字体大小
-        set_run_chinese_font(run, '宋体')
-        
-        # 添加页码占位符（实际Word中需要手动更新域）
-        para.add_run('\t')
-        page_run = para.add_run('...')
-        page_run.font.name = '宋体'
-        set_run_chinese_font(page_run, '宋体')
-    
-    # 添加空行
-    doc.add_paragraph()
 
 def setup_chinese_document_styles(doc):
     """
