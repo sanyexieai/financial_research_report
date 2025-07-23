@@ -1,5 +1,3 @@
-from app.prompt.generate_base import OPINION_CRITERIA
-
 # 一个专业的[角色定义]
 # 核心能力
 # - 能力1

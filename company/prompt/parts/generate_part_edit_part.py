@@ -1,7 +1,3 @@
-
-from app.prompt.generate_base import USER_PART_EXAMPLE, OPINION_CRITERIA
-from app.prompt.parts.generate_part_edit_base import FORMAT_ABSTRACT_OUT, FORMAT_PART_OUT
-
 # 一个专业的[角色定义]
 # 核心能力
 # - 能力1
