@@ -45,17 +45,11 @@ def convert_md_to_docx_pure_python(input_file: str, output_file: Optional[str] =
         # 设置文档样式（支持中文字体）
         setup_chinese_document_styles(doc)
         
-        # 重新启用目录生成功能
+        # 提取标题信息用于后续目录生成
         headings = extract_headings(soup)
-        if headings:
-            add_table_of_contents(doc, headings)
-            doc.add_page_break()  # 目录后分页
         
-        # 跳过处理 Markdown 中的目录部分，避免重复
-        process_elements_in_order_skip_toc(doc, soup)
-        
-        # 按顺序处理所有元素
-        process_elements_in_order(doc, soup)
+        # 按顺序处理所有元素，在摘要后插入目录
+        process_elements_with_toc_insertion(doc, soup, headings)
         
         # 保存文档
         doc.save(output_file)
@@ -67,6 +61,117 @@ def convert_md_to_docx_pure_python(input_file: str, output_file: Optional[str] =
         import traceback
         traceback.print_exc()
         return None
+
+def process_elements_with_toc_insertion(doc, soup, headings):
+    """
+    按顺序处理HTML元素，在摘要后插入目录
+    """
+    body = soup.find('body') if soup.find('body') else soup
+    toc_inserted = False
+    skip_markdown_toc = False
+    
+    for element in body.children:
+        if hasattr(element, 'name') and element.name:
+            # 跳过 Markdown 中的目录部分
+            if element.name == 'h2' and '目录' in element.get_text():
+                skip_markdown_toc = True
+                continue
+            
+            if skip_markdown_toc and element.name in ['ul', 'ol', 'li']:
+                continue
+                
+            if skip_markdown_toc and element.name and element.name.startswith('h'):
+                skip_markdown_toc = False
+            
+            # 处理当前元素
+            if not skip_markdown_toc:
+                process_single_element(doc, element)
+                
+                # 检查是否刚处理完摘要，如果是则插入目录
+                if not toc_inserted and element.name and element.name.startswith('h'):
+                    text = clean_text_with_references(element.get_text())
+                    if '摘要' in text or 'Abstract' in text:
+                        # 在摘要后插入目录
+                        if headings:
+                            doc.add_page_break()  # 摘要后分页
+                            add_improved_table_of_contents(doc, headings)
+                            doc.add_page_break()  # 目录后分页
+                            toc_inserted = True
+
+def add_improved_table_of_contents(doc, headings: List[Dict]):
+    """
+    添加改进的目录到文档
+    """
+    # 添加目录标题
+    toc_heading = doc.add_heading('目录', level=1)
+    toc_heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    for run in toc_heading.runs:
+        run.font.name = '黑体'
+        run.font.size = Pt(16)
+        run.font.bold = True
+        set_run_chinese_font(run, '黑体')
+    
+    # 添加空行
+    doc.add_paragraph()
+    
+    # 添加目录项
+    for i, heading in enumerate(headings):
+        level = heading['level']
+        text = heading['text']
+        
+        # 跳过目录标题本身
+        if '目录' in text:
+            continue
+            
+        # 根据标题级别设置缩进和样式
+        para = doc.add_paragraph()
+        
+        # 设置缩进
+        if level == 1:
+            para.paragraph_format.left_indent = Inches(0)
+            font_size = Pt(14)
+            is_bold = True
+        elif level == 2:
+            para.paragraph_format.left_indent = Inches(0.3)
+            font_size = Pt(12)
+            is_bold = False
+        else:
+            para.paragraph_format.left_indent = Inches(0.6)
+            font_size = Pt(11)
+            is_bold = False
+        
+        # 设置行间距
+        para.paragraph_format.space_after = Pt(6)
+        
+        # 添加标题文本
+        run = para.add_run(text)
+        run.font.name = '宋体'
+        run.font.size = font_size
+        run.font.bold = is_bold
+        set_run_chinese_font(run, '宋体')
+        
+        # 添加制表符和页码占位符
+        tab_run = para.add_run('\t')
+        
+        # 添加点线
+        dots_run = para.add_run('.' * 50)
+        dots_run.font.name = '宋体'
+        dots_run.font.size = Pt(10)
+        set_run_chinese_font(dots_run, '宋体')
+        
+        # 添加页码占位符
+        page_run = para.add_run(f'\t{i + 1}')
+        page_run.font.name = '宋体'
+        page_run.font.size = font_size
+        page_run.font.bold = is_bold
+        set_run_chinese_font(page_run, '宋体')
+        
+        # 设置制表位（右对齐页码）
+        tab_stops = para.paragraph_format.tab_stops
+        tab_stops.add_tab_stop(Inches(6.0))
+    
+    # 添加空行
+    doc.add_paragraph()
 
 def preprocess_markdown(content: str) -> str:
     """
@@ -213,7 +318,7 @@ def process_single_element(doc, element):
     if element.name and element.name.startswith('h'):
         # 标题
         level = int(element.name[1])
-        text = clean_text_with_references(element.get_text())
+        text = clean_text_with_references(element.get_text(), is_table_context=False)
         if text.strip():
             heading = doc.add_heading(text, level=level)
             for run in heading.runs:
@@ -221,13 +326,19 @@ def process_single_element(doc, element):
                 set_run_chinese_font(run, '黑体')
             
     elif element.name == 'p':
-        # 段落
-        text = clean_text_with_references(element.get_text())
+        # 段落 - 检查是否包含表格相关内容
+        text = element.get_text()
+        is_table_related = '数据来源' in text or '基于' in text or '注：' in text
+        text = clean_text_with_references(text, is_table_context=is_table_related)
         if text.strip():
             para = doc.add_paragraph(text)
             for run in para.runs:
                 run.font.name = '宋体'
                 set_run_chinese_font(run, '宋体')
+            
+            # 如果是表格描述段落，添加额外空行
+            if '基于' in text and '数据来源' in text:
+                doc.add_paragraph()  # 在表格描述后添加空行
             
     elif element.name == 'table':
         # 表格 - 使用改进的表格处理
@@ -269,7 +380,7 @@ def set_run_chinese_font(run, font_name):
     except Exception as e:
         print(f"设置run中文字体时出错: {e}")
 
-def clean_text_with_references(text: str) -> str:
+def clean_text_with_references(text: str, is_table_context: bool = False) -> str:
     """
     清理文本内容并正确处理参考文献，过滤数据来源信息
     """
@@ -277,15 +388,17 @@ def clean_text_with_references(text: str) -> str:
     # 修复：将【参考文献1】转换回正确的[1]格式
     text = re.sub(r'【参考文献(\d+)】', r'[\1]', text)
     
-    # 过滤数据来源信息
-    # 匹配各种数据来源格式并移除
-    text = re.sub(r'\(数据来源[：:][^)]*\)', '', text)  # (数据来源：xxx)
-    text = re.sub(r'数据来源[：:][^，。；\n]*[，。；]?', '', text)  # 数据来源：xxx
-    text = re.sub(r'来源[：:][^，。；\n]*[，。；]?', '', text)  # 来源：xxx
-    text = re.sub(r'资料来源[：:][^，。；\n]*[，。；]?', '', text)  # 资料来源：xxx
-    text = re.sub(r'数据源[：:][^，。；\n]*[，。；]?', '', text)  # 数据源：xxx
-    text = re.sub(r'\([^)]*来源[^)]*\)', '', text)  # (xxx来源xxx)
-    text = re.sub(r'\([^)]*数据[^)]*\)', '', text)  # (xxx数据xxx)
+    # 如果是表格上下文，则保留数据来源信息
+    if not is_table_context:
+        # 过滤数据来源信息
+        # 匹配各种数据来源格式并移除
+        text = re.sub(r'\(数据来源[：:][^)]*\)', '', text)  # (数据来源：xxx)
+        text = re.sub(r'数据来源[：:][^，。；\n]*[，。；]?', '', text)  # 数据来源：xxx
+        text = re.sub(r'来源[：:][^，。；\n]*[，。；]?', '', text)  # 来源：xxx
+        text = re.sub(r'资料来源[：:][^，。；\n]*[，。；]?', '', text)  # 资料来源：xxx
+        text = re.sub(r'数据源[：:][^，。；\n]*[，。；]?', '', text)  # 数据源：xxx
+        text = re.sub(r'\([^)]*来源[^)]*\)', '', text)  # (xxx来源xxx)
+        text = re.sub(r'\([^)]*数据[^)]*\)', '', text)  # (xxx数据xxx)
     
     # 清理多余的空格和标点
     text = re.sub(r'\s+', ' ', text)
@@ -298,10 +411,29 @@ def add_robust_table_to_doc(doc, table_element):
     强化的表格处理，解决表格转换错误问题并美化样式
     """
     try:
+        # 在表格前添加空行，确保与前面内容有适当间距
+        doc.add_paragraph()
+        
         # 获取所有行
-        rows = table_element.find_all('tr')
-        if not rows:
+        all_rows = table_element.find_all('tr')
+        if not all_rows:
             print("[警告] 表格中没有找到行")
+            return
+        
+        # 过滤掉包含数据来源信息的行
+        rows = []
+        source_info = None
+        
+        for row in all_rows:
+            row_text = row.get_text().strip()
+            # 检查是否是数据来源行
+            if '数据来源' in row_text or '来源' in row_text:
+                source_info = clean_text_with_references(row_text, is_table_context=True)
+                continue
+            rows.append(row)
+        
+        if not rows:
+            print("[警告] 过滤后表格中没有有效行")
             return
         
         # 分析表格结构
@@ -314,7 +446,7 @@ def add_robust_table_to_doc(doc, table_element):
             row_data = []
             
             for cell in cells:
-                cell_text = clean_text_with_references(cell.get_text())
+                cell_text = clean_text_with_references(cell.get_text(), is_table_context=True)
                 # 处理合并单元格
                 colspan = int(cell.get('colspan', 1))
                 rowspan = int(cell.get('rowspan', 1))
@@ -445,8 +577,20 @@ def add_robust_table_to_doc(doc, table_element):
         except Exception as border_error:
             print(f"[警告] 设置表格边框时出错: {border_error}")
         
-        # 添加表格后的空行
+        # 添加表格后的空行 - 增加更多空行以便后续注释
         doc.add_paragraph()
+        doc.add_paragraph()  # 额外的空行
+        # 如果有数据来源信息，作为独立段落添加
+        if source_info:
+            source_para = doc.add_paragraph(source_info)
+            for run in source_para.runs:
+                run.font.name = '宋体'
+                run.font.size = Pt(10)
+                run.font.italic = True  # 斜体显示数据来源
+                set_run_chinese_font(run, '宋体')
+            # 数据来源后再添加空行
+            doc.add_paragraph()
+        
         print(f"✅ 成功添加美化表格: {len(table_data)}行 x {max_cols}列")
         
     except Exception as e:

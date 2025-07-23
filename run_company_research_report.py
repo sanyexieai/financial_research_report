@@ -18,6 +18,7 @@ from company.model.report_info import ReportInfo
 
 from company.utils.content_convert import ContentConvert
 from config.database_config import db_config
+from data_collection_pipeline import DataCollectionPipeline
 from llm.config import LLMConfig
 from llm.llm_helper import LLMHelper
 from marco.tools.document_processing.pure_python_converter import convert_md_to_docx_pure_python
@@ -578,12 +579,29 @@ def main():
     parser.add_argument('--company_name', default='4Paradigm', help='目标公司名称')
     parser.add_argument('--company_code', default='06682.HK', help='股票代码')
     parser.add_argument('--template', action='store_true', help='使用模板大纲')
-
     args = parser.parse_args()
 
     try:
         # 创建研报生成实例
         company_code = args.company_code.split(".")
+
+        pipeline = DataCollectionPipeline(
+            target_company=args.company_name,
+            target_company_code=company_code[0],
+            target_company_market=company_code[1],
+            search_engine="all"
+        )
+
+        # 运行数据收集流程
+        success = pipeline.run_data_collection()
+
+        if success:
+            print("\n🎉 数据收集流程执行完毕！")
+            print("📊 所有数据已向量化存储到PostgreSQL数据库")
+        else:
+            print("\n❌ 数据收集流程执行失败！")
+
+
         pipeline = ReportGenerationPipeline(
             target_company=args.company_name,
             target_company_code=company_code[0],
