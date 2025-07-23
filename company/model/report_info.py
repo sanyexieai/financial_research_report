@@ -1,6 +1,6 @@
 from typing import Optional, Any, Mapping, Dict, List
 
-from app.agent.utils.content_convert import ContentConvert
+from company.utils.content_convert import ContentConvert
 
 
 class CurPart:
